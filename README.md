@@ -8,10 +8,10 @@ O **TinySystemOne** é uma implementação white-box de uma arquitetura neural d
 
 ## Características
 
-- 🚀 **100% C++26 puro**: Zero frameworks pesados (sem PyTorch, LibTorch, ONNX), zero dependência de rede, zero Jev dependency.
-- 📐 **White-Box Neural Engine**: Álgebra linear, backprop analítico exato, ativações (GELU, ReLU, Softmax) e otimizadores (AdamW, SGD) implementados explicitamente.
-- 🎯 **Incerteza e Calibração de 1ª Classe**: Shannon Entropy, Brier Score e Expected Calibration Error (ECE) integrados no pipeline de avaliação.
-- 🔬 **Microcosmo EXP-001**: Dataset sintético de estados estruturados para provar a discriminação entre estados nominais, degradados, inconsistentes e desconhecidos.
+- 🚀 **100% C++26 puro**: Zero frameworks pesados (sem PyTorch, LibTorch, ONNX), zero dependência de rede, zero dependência de serviços externos.
+- 📐 **White-Box Neural Engine**: Álgebra linear, ativadores (GELU, ReLU, Sigmoid, Softmax), retropropagação analítica exata e otimizadores (AdamW, SGD) implementados explicitamente.
+- 🎯 **Incerteza e Calibração de 1ª Classe**: Shannon Entropy, Brier Score e Expected Calibration Error (ECE) integrados no pipeline.
+- 🧠 **Arquitetura Multi-Head (v0.2.0)**: Predição conjunta de **Choice** (qualidade), **Noul** (atribuição causal) e **Score** (grau escalar contínuo calibrado).
 
 ---
 
@@ -29,12 +29,19 @@ cmake --build build
 
 ### Executar Testes Unitários
 ```bash
-./build/tso_tests
+ctest --test-dir build --output-on-failure
+# ou individualmente:
+./build/test_math
+./build/test_dataset
 ```
 
-### Executar o Experimento EXP-001
+### Executar Experimentos
 ```bash
+# EXP-001: Julgamento Calibrado em Microcosmo Estruturado
 ./build/tso_exp001
+
+# EXP-002: Julgamento Triplo Multi-Head (Choice + Noul + Score)
+./build/tso_exp002
 ```
 
 ---
@@ -42,7 +49,7 @@ cmake --build build
 ## Roadmap
 
 - [x] **v0.1**: Estado estruturado $\rightarrow$ Choice calibrado + Métricas ECE/Brier/Entropia (EXP-001)
-- [ ] **v0.2**: Choice + Noul + Score
+- [x] **v0.2**: Choice + Noul (atribuição causal) + Score contínuo calibrado (EXP-002)
 - [ ] **v0.3**: Missing values explícitos e aprendizado de incerteza
 - [ ] **v0.4**: Evidência contraditória e robustez de calibração
 - [ ] **v0.5**: OOD e generalização

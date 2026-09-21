@@ -58,7 +58,7 @@ void test_softmax_and_loss() {
 }
 
 void test_gradient_check() {
-    std::cout << "[TEST] Running numerical vs analytical gradient check...\n";
+    std::cout << "[TEST] Running numerical vs analytical gradient check (Single MLP)...\n";
     tso::Random rng(1234);
     std::vector<tso::LayerConfig> arch = {
         {4, 8, tso::Activation::GELU},
@@ -69,13 +69,11 @@ void test_gradient_check() {
     tso::Vector x = {0.5f, -0.2f, 1.0f, 0.1f};
     std::size_t target_idx = 1;
 
-    // 1. Analytical backward pass
     mlp.zero_grad();
     tso::Vector probs = mlp.forward(x);
     auto [loss, dlogits] = tso::CrossEntropyLoss::compute_from_index(probs, target_idx);
     mlp.backward(dlogits);
 
-    // 2. Numerical gradient check for weights in Layer 0
     constexpr float eps = 1e-4f;
     auto& layer0 = mlp.layers()[0];
 
@@ -83,12 +81,10 @@ void test_gradient_check() {
         for (std::size_t c = 0; c < layer0.W.cols; ++c) {
             const float orig_w = layer0.W(r, c);
 
-            // W + eps
             layer0.W(r, c) = orig_w + eps;
             tso::Vector probs_plus = mlp.forward(x);
             float loss_plus = tso::CrossEntropyLoss::compute_from_index(probs_plus, target_idx).loss;
 
-            // W - eps
             layer0.W(r, c) = orig_w - eps;
             tso::Vector probs_minus = mlp.forward(x);
             float loss_minus = tso::CrossEntropyLoss::compute_from_index(probs_minus, target_idx).loss;
@@ -102,7 +98,60 @@ void test_gradient_check() {
             TSO_ASSERT(diff < 1e-3f);
         }
     }
-    std::cout << "  ✓ Numerical vs analytical gradient check passed!\n";
+    std::cout << "  ✓ Single MLP gradient check passed!\n";
+}
+
+void test_multi_head_gradient_check() {
+    std::cout << "[TEST] Running numerical vs analytical gradient check (MultiHeadMLP)...\n";
+    tso::Random rng(5678);
+    std::vector<tso::LayerConfig> trunk = {
+        {4, 6, tso::Activation::GELU}
+    };
+    tso::MultiHeadMLP model(trunk, 6, 3, 4, rng);
+
+    tso::Vector x = {0.3f, -0.7f, 0.2f, 0.9f};
+    std::size_t c_target = 1;
+    std::size_t n_target = 2;
+    float s_target = 0.75f;
+
+    auto eval_loss = [&](tso::MultiHeadMLP& m) -> float {
+        auto out = m.forward(x);
+        float cl = tso::CrossEntropyLoss::compute_from_index(out.choice_probs, c_target).loss;
+        float nl = tso::CrossEntropyLoss::compute_from_index(out.noul_probs, n_target).loss;
+        float sl = tso::MSELoss::compute_scalar(out.score, s_target).loss;
+        return cl + nl + sl;
+    };
+
+    model.zero_grad();
+    auto out = model.forward(x);
+    auto [c_loss, d_c] = tso::CrossEntropyLoss::compute_from_index(out.choice_probs, c_target);
+    auto [n_loss, d_n] = tso::CrossEntropyLoss::compute_from_index(out.noul_probs, n_target);
+    auto [s_loss, d_s] = tso::MSELoss::compute_scalar(out.score, s_target);
+    model.backward(d_c, d_n, d_s);
+
+    constexpr float eps = 1e-3f;
+    auto& trunk_layer = model.trunk()[0];
+
+    for (std::size_t r = 0; r < trunk_layer.W.rows; ++r) {
+        for (std::size_t c = 0; c < trunk_layer.W.cols; ++c) {
+            const float orig_w = trunk_layer.W(r, c);
+
+            trunk_layer.W(r, c) = orig_w + eps;
+            float l_plus = eval_loss(model);
+
+            trunk_layer.W(r, c) = orig_w - eps;
+            float l_minus = eval_loss(model);
+
+            trunk_layer.W(r, c) = orig_w;
+
+            const float num_grad = (l_plus - l_minus) / (2.0f * eps);
+            const float anal_grad = trunk_layer.dW(r, c);
+
+            const float diff = std::abs(num_grad - anal_grad);
+            TSO_ASSERT(diff < 2e-3f);
+        }
+    }
+    std::cout << "  ✓ MultiHeadMLP joint gradient check passed!\n";
 }
 
 void test_calibration_metrics() {
@@ -135,6 +184,7 @@ int main() {
     test_matrix_vector_ops();
     test_softmax_and_loss();
     test_gradient_check();
+    test_multi_head_gradient_check();
     test_calibration_metrics();
     std::cout << "All math tests passed successfully!\n";
     return 0;

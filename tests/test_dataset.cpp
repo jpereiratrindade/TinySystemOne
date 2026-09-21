@@ -10,8 +10,8 @@
         } \
     } while (0)
 
-void test_state_encoding() {
-    std::cout << "[TEST] Running test_state_encoding...\n";
+void test_state_encoding_and_triple_judgment() {
+    std::cout << "[TEST] Running test_state_encoding_and_triple_judgment...\n";
     tso::StructuredState nominal_state{
         .declared = true,
         .registered = true,
@@ -23,43 +23,40 @@ void test_state_encoding() {
 
     tso::Vector x = nominal_state.encode();
     TSO_ASSERT(x.size() == 18);
-    // nominal ground truth check
-    TSO_ASSERT(nominal_state.ground_truth() == tso::Choice::Nominal);
+    auto j_nom = nominal_state.evaluate_judgment();
+    TSO_ASSERT(j_nom.choice == tso::Choice::Nominal);
+    TSO_ASSERT(j_nom.noul == tso::Noul::None);
+    TSO_ASSERT(j_nom.score >= 0.99f);
 
-    // Inconsistent state check
-    tso::StructuredState inconsistent_state{
+    // Inconsistent state check (declaration mismatch)
+    tso::StructuredState inconsistent_decl{
         .declared = false,
-        .registered = true, // contradictory!
+        .registered = true,
         .runtime = tso::RuntimeState::Running,
         .witness = tso::WitnessState::Valid,
         .freshness = tso::FreshnessState::Fresh,
         .health = tso::HealthState::Healthy
     };
-    TSO_ASSERT(inconsistent_state.ground_truth() == tso::Choice::Inconsistent);
+    auto j_inc = inconsistent_decl.evaluate_judgment();
+    TSO_ASSERT(j_inc.choice == tso::Choice::Inconsistent);
+    TSO_ASSERT(j_inc.noul == tso::Noul::Declaration);
+    TSO_ASSERT(j_inc.score <= 0.1f);
 
-    // Degraded state check
-    tso::StructuredState degraded_state{
+    // Degraded state check (witness stale)
+    tso::StructuredState degraded_witness{
         .declared = true,
         .registered = true,
         .runtime = tso::RuntimeState::Running,
-        .witness = tso::WitnessState::Valid,
-        .freshness = tso::FreshnessState::Expired, // degraded freshness
-        .health = tso::HealthState::Degraded
-    };
-    TSO_ASSERT(degraded_state.ground_truth() == tso::Choice::Degraded);
-
-    // Unknown state check
-    tso::StructuredState unknown_state{
-        .declared = true,
-        .registered = true,
-        .runtime = tso::RuntimeState::Unknown,
-        .witness = tso::WitnessState::Unknown,
+        .witness = tso::WitnessState::Stale,
         .freshness = tso::FreshnessState::Fresh,
-        .health = tso::HealthState::Unknown
+        .health = tso::HealthState::Healthy
     };
-    TSO_ASSERT(unknown_state.ground_truth() == tso::Choice::Unknown);
+    auto j_deg = degraded_witness.evaluate_judgment();
+    TSO_ASSERT(j_deg.choice == tso::Choice::Degraded);
+    TSO_ASSERT(j_deg.noul == tso::Noul::Witness);
+    TSO_ASSERT(j_deg.score >= 0.4f && j_deg.score <= 0.6f);
 
-    std::cout << "  ✓ State encoding & ground truth rules passed!\n";
+    std::cout << "  ✓ Triple judgment rules passed!\n";
 }
 
 void test_dataset_generator() {
@@ -74,6 +71,8 @@ void test_dataset_generator() {
     for (const auto& sample : split.train) {
         TSO_ASSERT(sample.x.size() == 18);
         TSO_ASSERT(sample.y < 4);
+        TSO_ASSERT(sample.noul_target < 7);
+        TSO_ASSERT(sample.score_target >= 0.0f && sample.score_target <= 1.0f);
     }
     std::cout << "  ✓ Dataset generator split passed (Train: " 
               << split.train.size() << ", Val: " << split.val.size()
@@ -82,7 +81,7 @@ void test_dataset_generator() {
 
 int main() {
     std::cout << "=== TinySystemOne Dataset Unit Tests ===\n";
-    test_state_encoding();
+    test_state_encoding_and_triple_judgment();
     test_dataset_generator();
     std::cout << "All dataset tests passed successfully!\n";
     return 0;

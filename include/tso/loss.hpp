@@ -9,7 +9,7 @@ namespace tso {
 
 struct LossResult {
     Scalar loss{0.0f};
-    Vector dlogits; // Gradient with respect to pre-softmax logits
+    Vector dlogits; // Gradient with respect to pre-activation / pre-softmax logits
 };
 
 class CrossEntropyLoss {
@@ -39,6 +39,27 @@ public:
             dlogits[i] = probs[i] - target_i;
         }
         return {loss, std::move(dlogits)};
+    }
+};
+
+class MSELoss {
+public:
+    // Mean Squared Error: L(pred, target) = (pred - target)^2
+    // dL/dpred = 2 * (pred - target)
+    static LossResult compute(const Vector& pred, const Vector& target) {
+        Scalar loss = 0.0f;
+        Vector dpred(pred.size());
+        for (std::size_t i = 0; i < pred.size(); ++i) {
+            const Scalar diff = pred[i] - target[i];
+            loss += diff * diff;
+            dpred[i] = 2.0f * diff;
+        }
+        return {loss, std::move(dpred)};
+    }
+
+    static LossResult compute_scalar(Scalar pred, Scalar target) {
+        const Scalar diff = pred - target;
+        return {diff * diff, Vector{2.0f * diff}};
     }
 };
 

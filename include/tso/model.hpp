@@ -134,4 +134,109 @@ private:
     Vector probs_cache_;
 };
 
+struct MultiHeadOutput {
+    Vector choice_probs;
+    Vector noul_probs;
+    Scalar score{0.0f};
+};
+
+class MultiHeadMLP {
+public:
+    MultiHeadMLP(
+        const std::vector<LayerConfig>& trunk_configs,
+        std::size_t latent_dim,
+        std::size_t choice_dim,
+        std::size_t noul_dim,
+        Random& rng
+    ) : choice_head_(latent_dim, choice_dim, Activation::None, rng),
+        noul_head_(latent_dim, noul_dim, Activation::None, rng),
+        score_head_(latent_dim, 1, Activation::Sigmoid, rng) {
+        trunk_.reserve(trunk_configs.size());
+        for (const auto& cfg : trunk_configs) {
+            trunk_.emplace_back(cfg.in_features, cfg.out_features, cfg.activation, rng);
+        }
+    }
+
+    MultiHeadOutput forward(const Vector& x) {
+        Vector h = x;
+        for (auto& layer : trunk_) {
+            h = layer.forward(h);
+        }
+
+        Vector c_logits = choice_head_.forward(h);
+        Vector n_logits = noul_head_.forward(h);
+        Vector s_out = score_head_.forward(h);
+
+        choice_probs_cache_ = softmax(c_logits);
+        noul_probs_cache_ = softmax(n_logits);
+        score_cache_ = s_out[0];
+
+        return MultiHeadOutput{
+            .choice_probs = choice_probs_cache_,
+            .noul_probs = noul_probs_cache_,
+            .score = score_cache_
+        };
+    }
+
+    void backward(const Vector& dlogits_choice, const Vector& dlogits_noul, const Vector& dscore) {
+        Vector d_h_choice = choice_head_.backward(dlogits_choice);
+        Vector d_h_noul = noul_head_.backward(dlogits_noul);
+        Vector d_h_score = score_head_.backward(dscore);
+
+        // Sum gradient contributions at trunk bottleneck
+        Vector d_h = std::move(d_h_choice);
+        vec_add_(d_h, d_h_noul);
+        vec_add_(d_h, d_h_score);
+
+        Vector grad = d_h;
+        for (auto it = trunk_.rbegin(); it != trunk_.rend(); ++it) {
+            grad = it->backward(grad);
+        }
+    }
+
+    void zero_grad() {
+        for (auto& layer : trunk_) {
+            layer.zero_grad();
+        }
+        choice_head_.zero_grad();
+        noul_head_.zero_grad();
+        score_head_.zero_grad();
+    }
+
+    void update(AdamW& optimizer) {
+        for (auto& layer : trunk_) {
+            layer.update(optimizer);
+        }
+        choice_head_.update(optimizer);
+        noul_head_.update(optimizer);
+        score_head_.update(optimizer);
+    }
+
+    [[nodiscard]] std::size_t num_params() const {
+        std::size_t total = 0;
+        for (const auto& layer : trunk_) {
+            total += layer.num_params();
+        }
+        total += choice_head_.num_params();
+        total += noul_head_.num_params();
+        total += score_head_.num_params();
+        return total;
+    }
+
+    [[nodiscard]] std::vector<Layer>& trunk() { return trunk_; }
+    [[nodiscard]] Layer& choice_head() { return choice_head_; }
+    [[nodiscard]] Layer& noul_head() { return noul_head_; }
+    [[nodiscard]] Layer& score_head() { return score_head_; }
+
+private:
+    std::vector<Layer> trunk_;
+    Layer choice_head_;
+    Layer noul_head_;
+    Layer score_head_;
+
+    Vector choice_probs_cache_;
+    Vector noul_probs_cache_;
+    Scalar score_cache_{0.0f};
+};
+
 } // namespace tso

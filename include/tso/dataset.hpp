@@ -27,10 +27,39 @@ inline std::string_view to_string(Choice c) {
     return "INVALID";
 }
 
+enum class Noul : std::size_t {
+    None = 0,
+    Declaration = 1,
+    Runtime = 2,
+    Witness = 3,
+    Freshness = 4,
+    Health = 5,
+    Multiple = 6
+};
+
+inline std::string_view to_string(Noul n) {
+    switch (n) {
+        case Noul::None: return "NONE";
+        case Noul::Declaration: return "DECLARATION";
+        case Noul::Runtime: return "RUNTIME";
+        case Noul::Witness: return "WITNESS";
+        case Noul::Freshness: return "FRESHNESS";
+        case Noul::Health: return "HEALTH";
+        case Noul::Multiple: return "MULTIPLE";
+    }
+    return "INVALID";
+}
+
 enum class RuntimeState : std::size_t { Running = 0, Absent = 1, Unknown = 2 };
 enum class WitnessState : std::size_t { Valid = 0, Invalid = 1, Stale = 2, Unknown = 3 };
 enum class FreshnessState : std::size_t { Fresh = 0, Aging = 1, Expired = 2 };
 enum class HealthState : std::size_t { Healthy = 0, Degraded = 1, Failing = 2, Unknown = 3 };
+
+struct TripleJudgment {
+    Choice choice{Choice::Nominal};
+    Noul noul{Noul::None};
+    Scalar score{1.0f};
+};
 
 struct StructuredState {
     bool declared{true};
@@ -58,11 +87,23 @@ struct StructuredState {
     }
 
     [[nodiscard]] Choice ground_truth() const {
+        return evaluate_judgment().choice;
+    }
+
+    [[nodiscard]] TripleJudgment evaluate_judgment() const {
         // 1. Inconsistent (Contradictory evidence)
-        if (!declared && registered) return Choice::Inconsistent;
-        if (runtime == RuntimeState::Running && witness == WitnessState::Invalid) return Choice::Inconsistent;
-        if (runtime == RuntimeState::Absent && witness == WitnessState::Valid) return Choice::Inconsistent;
-        if (health == HealthState::Healthy && freshness == FreshnessState::Expired) return Choice::Inconsistent;
+        if (!declared && registered) {
+            return {Choice::Inconsistent, Noul::Declaration, 0.05f};
+        }
+        if (runtime == RuntimeState::Running && witness == WitnessState::Invalid) {
+            return {Choice::Inconsistent, Noul::Witness, 0.05f};
+        }
+        if (runtime == RuntimeState::Absent && witness == WitnessState::Valid) {
+            return {Choice::Inconsistent, Noul::Runtime, 0.05f};
+        }
+        if (health == HealthState::Healthy && freshness == FreshnessState::Expired) {
+            return {Choice::Inconsistent, Noul::Freshness, 0.05f};
+        }
 
         // 2. Unknown (Insufficient evidence)
         std::size_t unknown_count = 0;
@@ -70,24 +111,34 @@ struct StructuredState {
         if (witness == WitnessState::Unknown) ++unknown_count;
         if (health == HealthState::Unknown) ++unknown_count;
         if (unknown_count >= 2 || (runtime == RuntimeState::Unknown && witness == WitnessState::Unknown)) {
-            return Choice::Unknown;
+            return {Choice::Unknown, Noul::Multiple, 0.15f};
         }
 
         // 3. Degraded
-        if (health == HealthState::Degraded || health == HealthState::Failing ||
-            freshness == FreshnessState::Expired || witness == WitnessState::Stale ||
-            runtime == RuntimeState::Absent) {
-            return Choice::Degraded;
+        if (health == HealthState::Failing) {
+            return {Choice::Degraded, Noul::Health, 0.15f};
+        }
+        if (runtime == RuntimeState::Absent) {
+            return {Choice::Degraded, Noul::Runtime, 0.25f};
+        }
+        if (freshness == FreshnessState::Expired) {
+            return {Choice::Degraded, Noul::Freshness, 0.35f};
+        }
+        if (witness == WitnessState::Stale) {
+            return {Choice::Degraded, Noul::Witness, 0.45f};
+        }
+        if (health == HealthState::Degraded) {
+            return {Choice::Degraded, Noul::Health, 0.55f};
         }
 
         // 4. Nominal
         if (declared && registered && runtime == RuntimeState::Running &&
-            witness == WitnessState::Valid && freshness == FreshnessState::Fresh &&
-            health == HealthState::Healthy) {
-            return Choice::Nominal;
+            witness == WitnessState::Valid && health == HealthState::Healthy) {
+            const Scalar s = (freshness == FreshnessState::Aging) ? 0.90f : 1.00f;
+            return {Choice::Nominal, Noul::None, s};
         }
 
-        return Choice::Degraded;
+        return {Choice::Degraded, Noul::Multiple, 0.50f};
     }
 
     [[nodiscard]] std::string to_json_str() const {
@@ -140,7 +191,9 @@ struct StructuredState {
 
 struct DataSample {
     Vector x;
-    std::size_t y;
+    std::size_t y;            // Choice target class
+    std::size_t noul_target;  // Noul target class
+    Scalar score_target;      // Continuous score target [0, 1]
     std::string description;
 };
 
@@ -162,17 +215,24 @@ public:
                     state.registered = true;
                     state.runtime = RuntimeState::Running;
                     state.witness = WitnessState::Valid;
-                    state.freshness = (rng.uniform() > 0.3f) ? FreshnessState::Fresh : FreshnessState::Aging;
+                    state.freshness = (rng.uniform() > 0.4f) ? FreshnessState::Fresh : FreshnessState::Aging;
                     state.health = HealthState::Healthy;
                     break;
-                case Choice::Degraded:
-                    state.declared = (rng.uniform() > 0.1f);
-                    state.registered = state.declared ? (rng.uniform() > 0.2f) : false;
-                    state.runtime = (rng.uniform() > 0.5f) ? RuntimeState::Running : RuntimeState::Absent;
-                    state.witness = (rng.uniform() > 0.5f) ? WitnessState::Valid : WitnessState::Stale;
-                    state.freshness = static_cast<FreshnessState>(rng.uniform_int(0, 2));
-                    state.health = (rng.uniform() > 0.5f) ? HealthState::Degraded : HealthState::Failing;
+                case Choice::Degraded: {
+                    state.declared = true;
+                    state.registered = true;
+                    state.runtime = RuntimeState::Running;
+                    state.witness = WitnessState::Valid;
+                    state.freshness = FreshnessState::Fresh;
+                    state.health = HealthState::Healthy;
+                    const int deg_type = rng.uniform_int(0, 4);
+                    if (deg_type == 0) state.health = HealthState::Degraded;
+                    else if (deg_type == 1) state.witness = WitnessState::Stale;
+                    else if (deg_type == 2) state.freshness = FreshnessState::Expired;
+                    else if (deg_type == 3) state.runtime = RuntimeState::Absent;
+                    else state.health = HealthState::Failing;
                     break;
+                }
                 case Choice::Inconsistent: {
                     const int scenario = rng.uniform_int(0, 3);
                     if (scenario == 0) {
@@ -202,7 +262,7 @@ public:
                     state.declared = (rng.uniform() > 0.5f);
                     state.registered = (rng.uniform() > 0.5f);
                     state.runtime = RuntimeState::Unknown;
-                    state.witness = RuntimeState::Unknown == state.runtime && rng.uniform() > 0.3f 
+                    state.witness = (RuntimeState::Unknown == state.runtime && rng.uniform() > 0.3f) 
                                     ? WitnessState::Unknown : WitnessState::Stale;
                     state.health = HealthState::Unknown;
                     break;
@@ -222,9 +282,12 @@ public:
             Choice target_choice = static_cast<Choice>(c);
             for (std::size_t i = 0; i < num_samples_per_class; ++i) {
                 StructuredState state = generate_sample_for_class(target_choice, rng);
+                TripleJudgment j = state.evaluate_judgment();
                 balanced.push_back({
                     .x = state.encode(),
-                    .y = static_cast<std::size_t>(target_choice),
+                    .y = static_cast<std::size_t>(j.choice),
+                    .noul_target = static_cast<std::size_t>(j.noul),
+                    .score_target = j.score,
                     .description = state.to_json_str()
                 });
             }
@@ -253,6 +316,8 @@ public:
         split.ood.push_back({
             .x = Vector(18, 0.0f),
             .y = static_cast<std::size_t>(Choice::Unknown),
+            .noul_target = static_cast<std::size_t>(Noul::Multiple),
+            .score_target = 0.0f,
             .description = "{\"ood\":\"all_zeros_no_signal\"}"
         });
 
@@ -261,6 +326,8 @@ public:
         split.ood.push_back({
             .x = uniform_v,
             .y = static_cast<std::size_t>(Choice::Unknown),
+            .noul_target = static_cast<std::size_t>(Noul::Multiple),
+            .score_target = 0.0f,
             .description = "{\"ood\":\"uniform_dispersion\"}"
         });
 
@@ -272,6 +339,8 @@ public:
         split.ood.push_back({
             .x = multihot_v,
             .y = static_cast<std::size_t>(Choice::Inconsistent),
+            .noul_target = static_cast<std::size_t>(Noul::Multiple),
+            .score_target = 0.0f,
             .description = "{\"ood\":\"simultaneous_multihot_conflict\"}"
         });
 
@@ -282,6 +351,8 @@ public:
             split.ood.push_back({
                 .x = corrupt_v,
                 .y = static_cast<std::size_t>(Choice::Unknown),
+                .noul_target = static_cast<std::size_t>(Noul::Multiple),
+                .score_target = 0.0f,
                 .description = std::format("{{\"ood\":\"corrupted_gaussian_sample_{}\"}}", k)
             });
         }

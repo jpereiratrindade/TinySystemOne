@@ -15,7 +15,8 @@ using Scalar = float;
 enum class Activation {
     None,
     ReLU,
-    GELU
+    GELU,
+    Sigmoid
 };
 
 struct Matrix {
@@ -132,6 +133,16 @@ inline Scalar dgelu(Scalar x) {
     return 0.5f * (1.0f + tanh_val) + 0.5f * x * sech2 * d_inner;
 }
 
+// Sigmoid
+inline Scalar sigmoid(Scalar x) {
+    return 1.0f / (1.0f + std::exp(-x));
+}
+
+inline Scalar dsigmoid(Scalar x) {
+    const Scalar s = sigmoid(x);
+    return s * (1.0f - s);
+}
+
 // Apply activation to vector
 inline Vector apply_activation(const Vector& x, Activation act) {
     Vector y(x.size());
@@ -141,6 +152,9 @@ inline Vector apply_activation(const Vector& x, Activation act) {
             break;
         case Activation::GELU:
             for (std::size_t i = 0; i < x.size(); ++i) y[i] = gelu(x[i]);
+            break;
+        case Activation::Sigmoid:
+            for (std::size_t i = 0; i < x.size(); ++i) y[i] = sigmoid(x[i]);
             break;
         case Activation::None:
         default:
@@ -159,6 +173,9 @@ inline Vector backward_activation(const Vector& dy, const Vector& z, Activation 
             break;
         case Activation::GELU:
             for (std::size_t i = 0; i < dy.size(); ++i) dx[i] = dy[i] * dgelu(z[i]);
+            break;
+        case Activation::Sigmoid:
+            for (std::size_t i = 0; i < dy.size(); ++i) dx[i] = dy[i] * dsigmoid(z[i]);
             break;
         case Activation::None:
         default:
