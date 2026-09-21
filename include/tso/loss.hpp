@@ -87,4 +87,31 @@ public:
     }
 };
 
+struct InvarianceLossResult {
+    Scalar loss{0.0f};
+    Vector grad_h1;
+    Vector grad_h2;
+};
+
+class InvarianceLoss {
+public:
+    // L_inv = 0.5 * ||h1 - h2||^2
+    // dL/dh1 = (h1 - h2), dL/dh2 = (h2 - h1)
+    static InvarianceLossResult compute(const Vector& h1, const Vector& h2) {
+        Scalar loss = 0.0f;
+        Vector grad_h1(h1.size());
+        Vector grad_h2(h2.size());
+
+        for (std::size_t i = 0; i < h1.size(); ++i) {
+            const Scalar diff = h1[i] - h2[i];
+            loss += 0.5f * diff * diff;
+            grad_h1[i] = diff;
+            grad_h2[i] = -diff;
+        }
+
+        return {loss, std::move(grad_h1), std::move(grad_h2)};
+    }
+};
+
 } // namespace tso
+

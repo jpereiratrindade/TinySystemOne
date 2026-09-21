@@ -71,6 +71,23 @@ inline std::string_view to_string(OodCategory cat) {
     return "UNKNOWN";
 }
 
+enum class EncodingForm : std::size_t {
+    CanonicalOneHot = 0,
+    NormalizedOrdinal = 1,
+    PermutedChannels = 2,
+    BipolarDifferential = 3
+};
+
+inline std::string_view to_string(EncodingForm form) {
+    switch (form) {
+        case EncodingForm::CanonicalOneHot: return "CANONICAL_ONE_HOT";
+        case EncodingForm::NormalizedOrdinal: return "NORMALIZED_ORDINAL";
+        case EncodingForm::PermutedChannels: return "PERMUTED_CHANNELS";
+        case EncodingForm::BipolarDifferential: return "BIPOLAR_DIFFERENTIAL";
+    }
+    return "UNKNOWN";
+}
+
 enum class RuntimeState : std::size_t { Running = 0, Absent = 1, Unknown = 2 };
 enum class WitnessState : std::size_t { Valid = 0, Invalid = 1, Stale = 2, Unknown = 3 };
 enum class FreshnessState : std::size_t { Fresh = 0, Aging = 1, Expired = 2 };
@@ -189,6 +206,58 @@ struct StructuredState {
         x[23] = mask.health ? 1.0f : 0.0f;
 
         return x;
+    }
+
+    [[nodiscard]] Vector encode_as(EncodingForm form, const PresenceMask& mask = {}) const {
+        switch (form) {
+            case EncodingForm::CanonicalOneHot:
+                return encode_with_mask(mask);
+
+            case EncodingForm::NormalizedOrdinal: {
+                Vector x(24, 0.0f);
+                if (mask.declared) x[0] = declared ? 1.0f : 0.0f;
+                if (mask.registered) x[2] = registered ? 1.0f : 0.0f;
+                if (mask.runtime) x[4] = static_cast<Scalar>(runtime) / 2.0f;
+                if (mask.witness) x[7] = static_cast<Scalar>(witness) / 3.0f;
+                if (mask.freshness) x[11] = static_cast<Scalar>(freshness) / 2.0f;
+                if (mask.health) x[14] = static_cast<Scalar>(health) / 3.0f;
+
+                x[18] = mask.declared ? 1.0f : 0.0f;
+                x[19] = mask.registered ? 1.0f : 0.0f;
+                x[20] = mask.runtime ? 1.0f : 0.0f;
+                x[21] = mask.witness ? 1.0f : 0.0f;
+                x[22] = mask.freshness ? 1.0f : 0.0f;
+                x[23] = mask.health ? 1.0f : 0.0f;
+                return x;
+            }
+
+            case EncodingForm::PermutedChannels: {
+                Vector x(24, 0.0f);
+                if (mask.health) x[0 + static_cast<std::size_t>(health)] = 1.0f;
+                if (mask.freshness) x[4 + static_cast<std::size_t>(freshness)] = 1.0f;
+                if (mask.witness) x[7 + static_cast<std::size_t>(witness)] = 1.0f;
+                if (mask.runtime) x[11 + static_cast<std::size_t>(runtime)] = 1.0f;
+                if (mask.registered) x[14 + (registered ? 0 : 1)] = 1.0f;
+                if (mask.declared) x[16 + (declared ? 0 : 1)] = 1.0f;
+
+                x[18] = mask.health ? 1.0f : 0.0f;
+                x[19] = mask.freshness ? 1.0f : 0.0f;
+                x[20] = mask.witness ? 1.0f : 0.0f;
+                x[21] = mask.runtime ? 1.0f : 0.0f;
+                x[22] = mask.registered ? 1.0f : 0.0f;
+                x[23] = mask.declared ? 1.0f : 0.0f;
+                return x;
+            }
+
+            case EncodingForm::BipolarDifferential: {
+                Vector x = encode_with_mask(mask);
+                for (std::size_t i = 0; i < 18; ++i) {
+                    x[i] = (x[i] > 0.5f) ? 1.0f : -1.0f;
+                }
+                return x;
+            }
+        }
+        return encode_with_mask(mask);
     }
 
     [[nodiscard]] Choice ground_truth() const {

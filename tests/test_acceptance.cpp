@@ -155,10 +155,112 @@ void test_generalization_and_ood_energy() {
     std::cout << "  ✓ Scientific acceptance criteria passed on unseen configurations, energy AUROC and selective prediction!\n";
 }
 
+void test_semantic_invariance_and_latent_manifolds() {
+    std::cout << "[ACCEPTANCE] Testing Semantic Equivalence & Latent Manifold Invariance (EXP-006)...\n";
+    constexpr std::uint64_t kSeed = 101;
+    tso::Random rng(kSeed);
+
+    std::vector<tso::LayerConfig> trunk_topology = {
+        {24, 32, tso::Activation::GELU},
+        {32, 16, tso::Activation::GELU}
+    };
+    tso::MultiHeadMLP model(trunk_topology, 16, 4, 7, rng);
+    auto split = tso::DatasetGenerator::generate_canonical_split(kSeed);
+    auto canonical_universe = tso::DatasetGenerator::generate_canonical_universe();
+
+    tso::AdamW optimizer(tso::AdamWConfig{.lr = 0.008f, .beta1 = 0.9f, .beta2 = 0.999f, .eps = 1e-8f, .weight_decay = 0.0005f});
+
+    // Train with multi-representation alignment
+    for (std::size_t epoch = 1; epoch <= 80; ++epoch) {
+        rng.shuffle(split.train);
+        for (std::size_t i = 0; i < split.train.size(); i += 16) {
+            const std::size_t cur_batch = std::min(std::size_t{16}, split.train.size() - i);
+            model.zero_grad();
+            for (std::size_t b = 0; b < cur_batch; ++b) {
+                const auto& sample = split.train[i + b];
+                auto out_a = model.forward(sample.x);
+                tso::Vector h_a = model.extract_latent(sample.x);
+
+                auto [c_loss, d_c] = tso::CrossEntropyLoss::compute_from_index(out_a.choice_probs, sample.y);
+                auto [n_loss, d_n] = tso::CrossEntropyLoss::compute_from_index(out_a.noul_probs, sample.noul_target);
+                auto [s_loss, d_s] = tso::MSELoss::compute_scalar(out_a.score, sample.score_target);
+
+                const float scale = 1.0f / static_cast<float>(cur_batch);
+                for (auto& g : d_c) g *= scale;
+                for (auto& g : d_n) g *= scale;
+                for (auto& g : d_s) g = g * 2.0f * scale;
+                model.backward(d_c, d_n, d_s, tso::Vector{0.0f});
+
+                // Invariant pair
+                const auto& state = canonical_universe[sample.state_id];
+                const auto form = static_cast<tso::EncodingForm>(1 + (b % 3));
+                tso::Vector x_alt = state.encode_as(form);
+                auto out_alt = model.forward(x_alt);
+                tso::Vector h_alt = model.extract_latent(x_alt);
+
+                auto [c_alt, d_c_alt] = tso::CrossEntropyLoss::compute_from_index(out_alt.choice_probs, sample.y);
+                for (auto& g : d_c_alt) g *= (scale * 0.5f);
+                model.backward(d_c_alt, tso::Vector(7, 0.0f), tso::Vector{0.0f}, tso::Vector{0.0f});
+
+                auto inv_res = tso::InvarianceLoss::compute(h_a, h_alt);
+                for (auto& g : inv_res.grad_h1) g *= (scale * 0.15f);
+                for (auto& g : inv_res.grad_h2) g *= (scale * 0.15f);
+                model.backward_trunk_from_latent(inv_res.grad_h1);
+                model.backward_trunk_from_latent(inv_res.grad_h2);
+            }
+            model.update(optimizer);
+        }
+    }
+
+    double sim_bipolar_sum = 0.0;
+    double sim_ordinal_sum = 0.0;
+    std::size_t matches = 0;
+    std::size_t total = 0;
+
+    for (const auto& st : canonical_universe) {
+        tso::Vector x_a = st.encode_as(tso::EncodingForm::CanonicalOneHot);
+        tso::Vector x_b = st.encode_as(tso::EncodingForm::NormalizedOrdinal);
+        tso::Vector x_d = st.encode_as(tso::EncodingForm::BipolarDifferential);
+
+        auto out_a = model.forward(x_a);
+        tso::Vector h_a = model.extract_latent(x_a);
+
+        auto out_b = model.forward(x_b);
+        tso::Vector h_b = model.extract_latent(x_b);
+
+        auto out_d = model.forward(x_d);
+        tso::Vector h_d = model.extract_latent(x_d);
+
+        sim_ordinal_sum += tso::Calibration::cosine_similarity(h_a, h_b);
+        sim_bipolar_sum += tso::Calibration::cosine_similarity(h_a, h_d);
+
+        auto get_idx = [](const tso::Vector& p) {
+            return std::distance(p.begin(), std::max_element(p.begin(), p.end()));
+        };
+        if (get_idx(out_a.choice_probs) == get_idx(out_d.choice_probs)) ++matches;
+        ++total;
+    }
+
+    const double mean_sim_ordinal = sim_ordinal_sum / static_cast<double>(total);
+    const double mean_sim_bipolar = sim_bipolar_sum / static_cast<double>(total);
+    const double agreement_bipolar = static_cast<double>(matches) / static_cast<double>(total);
+
+    std::cout << std::format("  • Mean Latent Cosine Similarity (Canonical vs Bipolar): {:.4f}\n", mean_sim_bipolar);
+    std::cout << std::format("  • Mean Latent Cosine Similarity (Canonical vs Ordinal): {:.4f}\n", mean_sim_ordinal);
+    std::cout << std::format("  • Cross-Syntax Choice Agreement Rate: {:.2f}%\n", agreement_bipolar * 100.0);
+
+    ACCEPTANCE_ASSERT(mean_sim_bipolar >= 0.80, "Mean latent cosine similarity (Canonical vs Bipolar) must be >= 0.80");
+    ACCEPTANCE_ASSERT(mean_sim_ordinal >= 0.50, "Mean latent cosine similarity (Canonical vs Ordinal) must be >= 0.50");
+    ACCEPTANCE_ASSERT(agreement_bipolar >= 0.90, "Cross-syntax choice agreement rate must be >= 90%");
+
+    std::cout << "  ✓ Scientific acceptance criteria passed for invariant latent manifolds!\n";
+}
+
 int main() {
     std::cout << "=== TinySystemOne Rigorous Scientific Acceptance Tests ===\n";
     test_disjoint_partitions();
     test_generalization_and_ood_energy();
+    test_semantic_invariance_and_latent_manifolds();
     std::cout << "\033[1;32mAll acceptance criteria satisfied with zero data leakage!\033[0m\n";
     return 0;
 }

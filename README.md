@@ -64,6 +64,9 @@ ctest --test-dir build --output-on-failure
 
 # EXP-005: Detecção de OOD por Energia Livre e Predição Seletiva
 ./build/tso_exp005
+
+# EXP-006: Representações Semanticamente Equivalentes e Variedades Latentes Invariantes
+./build/tso_exp006
 ```
 
 ---
@@ -75,7 +78,7 @@ ctest --test-dir build --output-on-failure
 - [x] **v0.3**: Missing values explícitos e aprendizado de incerteza (EXP-003)
 - [x] **v0.4**: Evidência contraditória e robustez de calibração (EXP-004)
 - [x] **v0.5**: OOD, Predição Seletiva / Abstenção Formal e Universo Canônico $\Omega=576$ (EXP-005)
-- [ ] **v0.6**: Representações semanticamente equivalentes
+- [x] **v0.6**: Representações semanticamente equivalentes e variedades latentes invariantes (EXP-006)
 - [ ] **v0.7**: Tokens / Embeddings
 - [ ] **v0.8**: Tiny Attention Encoder
 - [ ] **v0.9**: Linguagem semi-estruturada

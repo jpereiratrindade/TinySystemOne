@@ -208,6 +208,21 @@ public:
         }
     }
 
+    [[nodiscard]] Vector extract_latent(const Vector& x) {
+        Vector h = x;
+        for (auto& layer : trunk_) {
+            h = layer.forward(h);
+        }
+        return h;
+    }
+
+    void backward_trunk_from_latent(const Vector& d_h_latent) {
+        Vector grad = d_h_latent;
+        for (auto it = trunk_.rbegin(); it != trunk_.rend(); ++it) {
+            grad = it->backward(grad);
+        }
+    }
+
     void zero_grad() {
         for (auto& layer : trunk_) {
             layer.zero_grad();

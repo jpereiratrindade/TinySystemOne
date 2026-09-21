@@ -49,6 +49,9 @@ target_include_directories(tso_exp004 PRIVATE include)
 add_executable(tso_exp005 src/exp005_main.cpp)
 target_include_directories(tso_exp005 PRIVATE include)
 
+add_executable(tso_exp006 src/exp006_main.cpp)
+target_include_directories(tso_exp006 PRIVATE include)
+
 # High-Level Production Classifier CLI & Tool
 add_executable(tso_classifier src/classifier_cli.cpp)
 target_include_directories(tso_classifier PRIVATE include)
@@ -76,4 +79,5 @@ add_test(NAME Exp002 COMMAND tso_exp002)
 add_test(NAME Exp003 COMMAND tso_exp003)
 add_test(NAME Exp004 COMMAND tso_exp004)
 add_test(NAME Exp005 COMMAND tso_exp005)
+add_test(NAME Exp006 COMMAND tso_exp006)
 

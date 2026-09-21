@@ -103,6 +103,45 @@ public:
         return (static_cast<Scalar>(wins) + 0.5f * static_cast<Scalar>(ties)) / static_cast<Scalar>(total_pairs);
     }
 
+    // Cosine similarity: (h1 . h2) / (||h1|| * ||h2||)
+    static Scalar cosine_similarity(const Vector& h1, const Vector& h2) {
+        if (h1.size() != h2.size() || h1.empty()) return 0.0f;
+        Scalar dot = 0.0f;
+        Scalar norm1_sq = 0.0f;
+        Scalar norm2_sq = 0.0f;
+
+        for (std::size_t i = 0; i < h1.size(); ++i) {
+            dot += h1[i] * h2[i];
+            norm1_sq += h1[i] * h1[i];
+            norm2_sq += h2[i] * h2[i];
+        }
+
+        const Scalar denom = std::sqrt(norm1_sq) * std::sqrt(norm2_sq);
+        if (denom < kEps) return 1.0f;
+        return dot / denom;
+    }
+
+    // Euclidean distance: ||h1 - h2||_2
+    static Scalar euclidean_distance(const Vector& h1, const Vector& h2) {
+        if (h1.size() != h2.size() || h1.empty()) return 0.0f;
+        Scalar sum_sq = 0.0f;
+        for (std::size_t i = 0; i < h1.size(); ++i) {
+            const Scalar diff = h1[i] - h2[i];
+            sum_sq += diff * diff;
+        }
+        return std::sqrt(sum_sq);
+    }
+
+    // Total Variation Distance between two probability distributions: 0.5 * sum |p1_i - p2_i|
+    static Scalar total_variation_distance(const Vector& p1, const Vector& p2) {
+        if (p1.size() != p2.size() || p1.empty()) return 1.0f;
+        Scalar tvd = 0.0f;
+        for (std::size_t i = 0; i < p1.size(); ++i) {
+            tvd += std::abs(p1[i] - p2[i]);
+        }
+        return 0.5f * tvd;
+    }
+
     // Evaluate full calibration report across multiple predictions
     static CalibrationReport evaluate(
         const std::vector<Vector>& all_probs,
