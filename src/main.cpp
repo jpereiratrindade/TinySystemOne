@@ -48,13 +48,13 @@ int main() {
 
     std::cout << "\033[1m[1] Configuração do Microcosmo & Arquitetura\033[0m\n";
     std::vector<tso::LayerConfig> topology = {
-        {18, 32, tso::Activation::GELU},
+        {24, 32, tso::Activation::GELU},
         {32, 16, tso::Activation::GELU},
         {16, 4,  tso::Activation::None}
     };
 
     tso::MLP model(topology, rng);
-    std::cout << std::format("  • Topologia: 18 (Input) -> 32 (GELU) -> 16 (GELU) -> 4 (Softmax)\n");
+    std::cout << std::format("  • Topologia: 24 (Input) -> 32 (GELU) -> 16 (GELU) -> 4 (Softmax)\n");
     std::cout << std::format("  • Total de Parâmetros: {}\n", model.num_params());
 
     // 2. Generate Dataset

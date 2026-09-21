@@ -16,7 +16,8 @@ enum class Activation {
     None,
     ReLU,
     GELU,
-    Sigmoid
+    Sigmoid,
+    Softplus
 };
 
 struct Matrix {
@@ -143,6 +144,16 @@ inline Scalar dsigmoid(Scalar x) {
     return s * (1.0f - s);
 }
 
+// Softplus: ln(1 + e^x), derivative is Sigmoid(x)
+inline Scalar softplus(Scalar x) {
+    if (x > 20.0f) return x; // Avoid overflow
+    return std::log1p(std::exp(x));
+}
+
+inline Scalar dsoftplus(Scalar x) {
+    return sigmoid(x);
+}
+
 // Apply activation to vector
 inline Vector apply_activation(const Vector& x, Activation act) {
     Vector y(x.size());
@@ -155,6 +166,9 @@ inline Vector apply_activation(const Vector& x, Activation act) {
             break;
         case Activation::Sigmoid:
             for (std::size_t i = 0; i < x.size(); ++i) y[i] = sigmoid(x[i]);
+            break;
+        case Activation::Softplus:
+            for (std::size_t i = 0; i < x.size(); ++i) y[i] = softplus(x[i]);
             break;
         case Activation::None:
         default:
@@ -176,6 +190,9 @@ inline Vector backward_activation(const Vector& dy, const Vector& z, Activation 
             break;
         case Activation::Sigmoid:
             for (std::size_t i = 0; i < dy.size(); ++i) dx[i] = dy[i] * dsigmoid(z[i]);
+            break;
+        case Activation::Softplus:
+            for (std::size_t i = 0; i < dy.size(); ++i) dx[i] = dy[i] * dsoftplus(z[i]);
             break;
         case Activation::None:
         default:

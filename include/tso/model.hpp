@@ -138,6 +138,7 @@ struct MultiHeadOutput {
     Vector choice_probs;
     Vector noul_probs;
     Scalar score{0.0f};
+    Scalar uncertainty{0.0f};
 };
 
 class MultiHeadMLP {
@@ -150,7 +151,8 @@ public:
         Random& rng
     ) : choice_head_(latent_dim, choice_dim, Activation::None, rng),
         noul_head_(latent_dim, noul_dim, Activation::None, rng),
-        score_head_(latent_dim, 1, Activation::Sigmoid, rng) {
+        score_head_(latent_dim, 1, Activation::Sigmoid, rng),
+        uncertainty_head_(latent_dim, 1, Activation::Softplus, rng) {
         trunk_.reserve(trunk_configs.size());
         for (const auto& cfg : trunk_configs) {
             trunk_.emplace_back(cfg.in_features, cfg.out_features, cfg.activation, rng);
@@ -166,27 +168,37 @@ public:
         Vector c_logits = choice_head_.forward(h);
         Vector n_logits = noul_head_.forward(h);
         Vector s_out = score_head_.forward(h);
+        Vector u_out = uncertainty_head_.forward(h);
 
         choice_probs_cache_ = softmax(c_logits);
         noul_probs_cache_ = softmax(n_logits);
         score_cache_ = s_out[0];
+        uncertainty_cache_ = u_out[0];
 
         return MultiHeadOutput{
             .choice_probs = choice_probs_cache_,
             .noul_probs = noul_probs_cache_,
-            .score = score_cache_
+            .score = score_cache_,
+            .uncertainty = uncertainty_cache_
         };
     }
 
-    void backward(const Vector& dlogits_choice, const Vector& dlogits_noul, const Vector& dscore) {
+    void backward(
+        const Vector& dlogits_choice,
+        const Vector& dlogits_noul,
+        const Vector& dscore,
+        const Vector& duncertainty
+    ) {
         Vector d_h_choice = choice_head_.backward(dlogits_choice);
         Vector d_h_noul = noul_head_.backward(dlogits_noul);
         Vector d_h_score = score_head_.backward(dscore);
+        Vector d_h_unc = uncertainty_head_.backward(duncertainty);
 
         // Sum gradient contributions at trunk bottleneck
         Vector d_h = std::move(d_h_choice);
         vec_add_(d_h, d_h_noul);
         vec_add_(d_h, d_h_score);
+        vec_add_(d_h, d_h_unc);
 
         Vector grad = d_h;
         for (auto it = trunk_.rbegin(); it != trunk_.rend(); ++it) {
@@ -201,6 +213,7 @@ public:
         choice_head_.zero_grad();
         noul_head_.zero_grad();
         score_head_.zero_grad();
+        uncertainty_head_.zero_grad();
     }
 
     void update(AdamW& optimizer) {
@@ -210,6 +223,7 @@ public:
         choice_head_.update(optimizer);
         noul_head_.update(optimizer);
         score_head_.update(optimizer);
+        uncertainty_head_.update(optimizer);
     }
 
     [[nodiscard]] std::size_t num_params() const {
@@ -220,6 +234,7 @@ public:
         total += choice_head_.num_params();
         total += noul_head_.num_params();
         total += score_head_.num_params();
+        total += uncertainty_head_.num_params();
         return total;
     }
 
@@ -227,16 +242,19 @@ public:
     [[nodiscard]] Layer& choice_head() { return choice_head_; }
     [[nodiscard]] Layer& noul_head() { return noul_head_; }
     [[nodiscard]] Layer& score_head() { return score_head_; }
+    [[nodiscard]] Layer& uncertainty_head() { return uncertainty_head_; }
 
 private:
     std::vector<Layer> trunk_;
     Layer choice_head_;
     Layer noul_head_;
     Layer score_head_;
+    Layer uncertainty_head_;
 
     Vector choice_probs_cache_;
     Vector noul_probs_cache_;
     Scalar score_cache_{0.0f};
+    Scalar uncertainty_cache_{0.0f};
 };
 
 } // namespace tso

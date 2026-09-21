@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 project(TinySystemOne
-    VERSION 0.2.0
+    VERSION 0.3.0
     DESCRIPTION "A white-box C++26 engine to study calibrated probabilistic judgments and uncertainty"
     LANGUAGES CXX
 )
@@ -34,6 +34,9 @@ target_include_directories(tso_exp001 PRIVATE include)
 add_executable(tso_exp002 src/exp002_main.cpp)
 target_include_directories(tso_exp002 PRIVATE include)
 
+add_executable(tso_exp003 src/exp003_main.cpp)
+target_include_directories(tso_exp003 PRIVATE include)
+
 # Unit Tests Targets
 add_executable(test_math tests/test_math.cpp)
 target_include_directories(test_math PRIVATE include)
@@ -46,3 +49,4 @@ add_test(NAME TestMath COMMAND test_math)
 add_test(NAME TestDataset COMMAND test_dataset)
 add_test(NAME Exp001 COMMAND tso_exp001)
 add_test(NAME Exp002 COMMAND tso_exp002)
+add_test(NAME Exp003 COMMAND tso_exp003)

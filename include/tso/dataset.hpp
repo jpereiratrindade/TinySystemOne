@@ -55,10 +55,31 @@ enum class WitnessState : std::size_t { Valid = 0, Invalid = 1, Stale = 2, Unkno
 enum class FreshnessState : std::size_t { Fresh = 0, Aging = 1, Expired = 2 };
 enum class HealthState : std::size_t { Healthy = 0, Degraded = 1, Failing = 2, Unknown = 3 };
 
+struct PresenceMask {
+    bool declared{true};
+    bool registered{true};
+    bool runtime{true};
+    bool witness{true};
+    bool freshness{true};
+    bool health{true};
+
+    [[nodiscard]] std::size_t count_missing() const {
+        std::size_t m = 0;
+        if (!declared) ++m;
+        if (!registered) ++m;
+        if (!runtime) ++m;
+        if (!witness) ++m;
+        if (!freshness) ++m;
+        if (!health) ++m;
+        return m;
+    }
+};
+
 struct TripleJudgment {
     Choice choice{Choice::Nominal};
     Noul noul{Noul::None};
     Scalar score{1.0f};
+    Scalar uncertainty{0.01f}; // Epistemic variance target
 };
 
 struct StructuredState {
@@ -70,19 +91,29 @@ struct StructuredState {
     HealthState health{HealthState::Healthy};
 
     [[nodiscard]] Vector encode() const {
-        Vector x(18, 0.0f);
-        // declared (2)
-        x[declared ? 0 : 1] = 1.0f;
-        // registered (2)
-        x[2 + (registered ? 0 : 1)] = 1.0f;
-        // runtime (3)
-        x[4 + static_cast<std::size_t>(runtime)] = 1.0f;
-        // witness (4)
-        x[7 + static_cast<std::size_t>(witness)] = 1.0f;
-        // freshness (3)
-        x[11 + static_cast<std::size_t>(freshness)] = 1.0f;
-        // health (4)
-        x[14 + static_cast<std::size_t>(health)] = 1.0f;
+        return encode_with_mask(PresenceMask{});
+    }
+
+    [[nodiscard]] Vector encode_with_mask(const PresenceMask& mask) const {
+        // 18 feature dims + 6 presence mask dims = 24 dimensions
+        Vector x(24, 0.0f);
+        
+        // Features (only set if presence flag is true)
+        if (mask.declared) x[declared ? 0 : 1] = 1.0f;
+        if (mask.registered) x[2 + (registered ? 0 : 1)] = 1.0f;
+        if (mask.runtime) x[4 + static_cast<std::size_t>(runtime)] = 1.0f;
+        if (mask.witness) x[7 + static_cast<std::size_t>(witness)] = 1.0f;
+        if (mask.freshness) x[11 + static_cast<std::size_t>(freshness)] = 1.0f;
+        if (mask.health) x[14 + static_cast<std::size_t>(health)] = 1.0f;
+
+        // Presence Mask indicators
+        x[18] = mask.declared ? 1.0f : 0.0f;
+        x[19] = mask.registered ? 1.0f : 0.0f;
+        x[20] = mask.runtime ? 1.0f : 0.0f;
+        x[21] = mask.witness ? 1.0f : 0.0f;
+        x[22] = mask.freshness ? 1.0f : 0.0f;
+        x[23] = mask.health ? 1.0f : 0.0f;
+
         return x;
     }
 
@@ -91,54 +122,68 @@ struct StructuredState {
     }
 
     [[nodiscard]] TripleJudgment evaluate_judgment() const {
-        // 1. Inconsistent (Contradictory evidence)
-        if (!declared && registered) {
-            return {Choice::Inconsistent, Noul::Declaration, 0.05f};
-        }
-        if (runtime == RuntimeState::Running && witness == WitnessState::Invalid) {
-            return {Choice::Inconsistent, Noul::Witness, 0.05f};
-        }
-        if (runtime == RuntimeState::Absent && witness == WitnessState::Valid) {
-            return {Choice::Inconsistent, Noul::Runtime, 0.05f};
-        }
-        if (health == HealthState::Healthy && freshness == FreshnessState::Expired) {
-            return {Choice::Inconsistent, Noul::Freshness, 0.05f};
+        return evaluate_judgment_with_mask(PresenceMask{});
+    }
+
+    [[nodiscard]] TripleJudgment evaluate_judgment_with_mask(const PresenceMask& mask) const {
+        const std::size_t missing_cnt = mask.count_missing();
+
+        // If information is severely missing (>= 3 fields missing)
+        if (missing_cnt >= 3) {
+            const Scalar unc = 0.05f + static_cast<Scalar>(missing_cnt) * 0.05f;
+            return {Choice::Unknown, Noul::Multiple, 0.20f, unc};
         }
 
-        // 2. Unknown (Insufficient evidence)
-        std::size_t unknown_count = 0;
-        if (runtime == RuntimeState::Unknown) ++unknown_count;
-        if (witness == WitnessState::Unknown) ++unknown_count;
-        if (health == HealthState::Unknown) ++unknown_count;
-        if (unknown_count >= 2 || (runtime == RuntimeState::Unknown && witness == WitnessState::Unknown)) {
-            return {Choice::Unknown, Noul::Multiple, 0.15f};
+        // 1. Inconsistent (Contradictory evidence)
+        if (mask.declared && mask.registered && !declared && registered) {
+            return {Choice::Inconsistent, Noul::Declaration, 0.05f, 0.01f + 0.04f * static_cast<Scalar>(missing_cnt)};
+        }
+        if (mask.runtime && mask.witness && runtime == RuntimeState::Running && witness == WitnessState::Invalid) {
+            return {Choice::Inconsistent, Noul::Witness, 0.05f, 0.01f + 0.04f * static_cast<Scalar>(missing_cnt)};
+        }
+        if (mask.runtime && mask.witness && runtime == RuntimeState::Absent && witness == WitnessState::Valid) {
+            return {Choice::Inconsistent, Noul::Runtime, 0.05f, 0.01f + 0.04f * static_cast<Scalar>(missing_cnt)};
+        }
+        if (mask.health && mask.freshness && health == HealthState::Healthy && freshness == FreshnessState::Expired) {
+            return {Choice::Inconsistent, Noul::Freshness, 0.05f, 0.01f + 0.04f * static_cast<Scalar>(missing_cnt)};
+        }
+
+        // 2. Unknown (Insufficient evidence via states or missingness)
+        std::size_t unknown_count = missing_cnt;
+        if (mask.runtime && runtime == RuntimeState::Unknown) ++unknown_count;
+        if (mask.witness && witness == WitnessState::Unknown) ++unknown_count;
+        if (mask.health && health == HealthState::Unknown) ++unknown_count;
+        if (unknown_count >= 2) {
+            const Scalar unc = 0.02f + static_cast<Scalar>(unknown_count) * 0.04f;
+            return {Choice::Unknown, Noul::Multiple, 0.15f, unc};
         }
 
         // 3. Degraded
-        if (health == HealthState::Failing) {
-            return {Choice::Degraded, Noul::Health, 0.15f};
+        if (mask.health && health == HealthState::Failing) {
+            return {Choice::Degraded, Noul::Health, 0.15f, 0.02f};
         }
-        if (runtime == RuntimeState::Absent) {
-            return {Choice::Degraded, Noul::Runtime, 0.25f};
+        if (mask.runtime && runtime == RuntimeState::Absent) {
+            return {Choice::Degraded, Noul::Runtime, 0.25f, 0.02f};
         }
-        if (freshness == FreshnessState::Expired) {
-            return {Choice::Degraded, Noul::Freshness, 0.35f};
+        if (mask.freshness && freshness == FreshnessState::Expired) {
+            return {Choice::Degraded, Noul::Freshness, 0.35f, 0.02f};
         }
-        if (witness == WitnessState::Stale) {
-            return {Choice::Degraded, Noul::Witness, 0.45f};
+        if (mask.witness && witness == WitnessState::Stale) {
+            return {Choice::Degraded, Noul::Witness, 0.45f, 0.02f};
         }
-        if (health == HealthState::Degraded) {
-            return {Choice::Degraded, Noul::Health, 0.55f};
+        if (mask.health && health == HealthState::Degraded) {
+            return {Choice::Degraded, Noul::Health, 0.55f, 0.02f};
         }
 
         // 4. Nominal
         if (declared && registered && runtime == RuntimeState::Running &&
             witness == WitnessState::Valid && health == HealthState::Healthy) {
             const Scalar s = (freshness == FreshnessState::Aging) ? 0.90f : 1.00f;
-            return {Choice::Nominal, Noul::None, s};
+            const Scalar unc = 0.01f + 0.03f * static_cast<Scalar>(missing_cnt);
+            return {Choice::Nominal, Noul::None, s, unc};
         }
 
-        return {Choice::Degraded, Noul::Multiple, 0.50f};
+        return {Choice::Degraded, Noul::Multiple, 0.50f, 0.05f};
     }
 
     [[nodiscard]] std::string to_json_str() const {
@@ -194,6 +239,7 @@ struct DataSample {
     std::size_t y;            // Choice target class
     std::size_t noul_target;  // Noul target class
     Scalar score_target;      // Continuous score target [0, 1]
+    Scalar uncertainty_target;// Uncertainty variance target
     std::string description;
 };
 
@@ -288,6 +334,7 @@ public:
                     .y = static_cast<std::size_t>(j.choice),
                     .noul_target = static_cast<std::size_t>(j.noul),
                     .score_target = j.score,
+                    .uncertainty_target = j.uncertainty,
                     .description = state.to_json_str()
                 });
             }
@@ -295,7 +342,6 @@ public:
 
         rng.shuffle(balanced);
 
-        // Partition 80% train, 10% val, 10% test
         const std::size_t total = balanced.size();
         const std::size_t train_size = (total * 80) / 100;
         const std::size_t val_size = (total * 10) / 100;
@@ -311,50 +357,90 @@ public:
             }
         }
 
-        // Generate Out-Of-Distribution (OOD) and extreme ambiguity cases
-        // 1. All zero vector (No signal)
+        // OOD Samples (24-dimensional vectors)
         split.ood.push_back({
-            .x = Vector(18, 0.0f),
+            .x = Vector(24, 0.0f),
             .y = static_cast<std::size_t>(Choice::Unknown),
             .noul_target = static_cast<std::size_t>(Noul::Multiple),
             .score_target = 0.0f,
+            .uncertainty_target = 0.5f,
             .description = "{\"ood\":\"all_zeros_no_signal\"}"
         });
 
-        // 2. Uniform noise vector
-        Vector uniform_v(18, 1.0f / 18.0f);
+        Vector uniform_v(24, 1.0f / 24.0f);
         split.ood.push_back({
             .x = uniform_v,
             .y = static_cast<std::size_t>(Choice::Unknown),
             .noul_target = static_cast<std::size_t>(Noul::Multiple),
             .score_target = 0.0f,
+            .uncertainty_target = 0.5f,
             .description = "{\"ood\":\"uniform_dispersion\"}"
         });
 
-        // 3. Multi-hot contradictory conflict: multiple states active simultaneously
-        Vector multihot_v(18, 0.0f);
-        multihot_v[0] = 1.0f; multihot_v[1] = 1.0f; // declared true AND false
-        multihot_v[4] = 1.0f; multihot_v[5] = 1.0f; // running AND absent
-        multihot_v[7] = 1.0f; multihot_v[8] = 1.0f; // valid AND invalid
+        Vector multihot_v(24, 0.0f);
+        multihot_v[0] = 1.0f; multihot_v[1] = 1.0f;
+        multihot_v[4] = 1.0f; multihot_v[5] = 1.0f;
+        multihot_v[7] = 1.0f; multihot_v[8] = 1.0f;
+        for (std::size_t k = 18; k < 24; ++k) multihot_v[k] = 1.0f;
         split.ood.push_back({
             .x = multihot_v,
             .y = static_cast<std::size_t>(Choice::Inconsistent),
             .noul_target = static_cast<std::size_t>(Noul::Multiple),
             .score_target = 0.0f,
+            .uncertainty_target = 0.3f,
             .description = "{\"ood\":\"simultaneous_multihot_conflict\"}"
         });
 
-        // 4. Random Gaussian corrupted vectors
-        for (int k = 0; k < 10; ++k) {
-            Vector corrupt_v(18);
-            for (auto& val : corrupt_v) val = std::abs(rng.normal(0.5f, 0.3f));
-            split.ood.push_back({
-                .x = corrupt_v,
-                .y = static_cast<std::size_t>(Choice::Unknown),
-                .noul_target = static_cast<std::size_t>(Noul::Multiple),
-                .score_target = 0.0f,
-                .description = std::format("{{\"ood\":\"corrupted_gaussian_sample_{}\"}}", k)
-            });
+        return split;
+    }
+
+    // EXP-003: Training with missingness/dropout on presence mask
+    static DatasetSplit generate_exp003(std::size_t num_samples_per_class = 300, std::uint64_t seed = 42) {
+        Random rng(seed);
+        std::vector<DataSample> samples;
+
+        for (std::size_t c = 0; c < 4; ++c) {
+            Choice target_choice = static_cast<Choice>(c);
+            for (std::size_t i = 0; i < num_samples_per_class; ++i) {
+                StructuredState state = generate_sample_for_class(target_choice, rng);
+
+                // Apply probabilistic missingness during training (0% to 50% chance per field)
+                PresenceMask mask;
+                const float missing_rate = rng.uniform(0.0f, 0.4f);
+                mask.declared = (rng.uniform() > missing_rate);
+                mask.registered = (rng.uniform() > missing_rate);
+                mask.runtime = (rng.uniform() > missing_rate);
+                mask.witness = (rng.uniform() > missing_rate);
+                mask.freshness = (rng.uniform() > missing_rate);
+                mask.health = (rng.uniform() > missing_rate);
+
+                TripleJudgment j = state.evaluate_judgment_with_mask(mask);
+                samples.push_back({
+                    .x = state.encode_with_mask(mask),
+                    .y = static_cast<std::size_t>(j.choice),
+                    .noul_target = static_cast<std::size_t>(j.noul),
+                    .score_target = j.score,
+                    .uncertainty_target = j.uncertainty,
+                    .description = state.to_json_str()
+                });
+            }
+        }
+
+        rng.shuffle(samples);
+
+        const std::size_t total = samples.size();
+        const std::size_t train_size = (total * 80) / 100;
+        const std::size_t val_size = (total * 10) / 100;
+
+        DatasetSplit split;
+        for (std::size_t i = 0; i < total; ++i) {
+            if (i < train_size) {
+                split.train.push_back(samples[i]);
+            } else if (i < train_size + val_size) {
+                split.val.push_back(samples[i]);
+            } else {
+                split.test.push_back(samples[i]);
+            }
         }
 
         return split;

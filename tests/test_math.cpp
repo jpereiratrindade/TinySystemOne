@@ -102,7 +102,7 @@ void test_gradient_check() {
 }
 
 void test_multi_head_gradient_check() {
-    std::cout << "[TEST] Running numerical vs analytical gradient check (MultiHeadMLP)...\n";
+    std::cout << "[TEST] Running numerical vs analytical gradient check (4-Head MultiHeadMLP)...\n";
     tso::Random rng(5678);
     std::vector<tso::LayerConfig> trunk = {
         {4, 6, tso::Activation::GELU}
@@ -118,16 +118,16 @@ void test_multi_head_gradient_check() {
         auto out = m.forward(x);
         float cl = tso::CrossEntropyLoss::compute_from_index(out.choice_probs, c_target).loss;
         float nl = tso::CrossEntropyLoss::compute_from_index(out.noul_probs, n_target).loss;
-        float sl = tso::MSELoss::compute_scalar(out.score, s_target).loss;
-        return cl + nl + sl;
+        auto nll = tso::GaussianNLLLoss::compute(out.score, out.uncertainty, s_target);
+        return cl + nl + nll.loss;
     };
 
     model.zero_grad();
     auto out = model.forward(x);
     auto [c_loss, d_c] = tso::CrossEntropyLoss::compute_from_index(out.choice_probs, c_target);
     auto [n_loss, d_n] = tso::CrossEntropyLoss::compute_from_index(out.noul_probs, n_target);
-    auto [s_loss, d_s] = tso::MSELoss::compute_scalar(out.score, s_target);
-    model.backward(d_c, d_n, d_s);
+    auto nll = tso::GaussianNLLLoss::compute(out.score, out.uncertainty, s_target);
+    model.backward(d_c, d_n, nll.d_mu, nll.d_var);
 
     constexpr float eps = 1e-3f;
     auto& trunk_layer = model.trunk()[0];
@@ -151,7 +151,7 @@ void test_multi_head_gradient_check() {
             TSO_ASSERT(diff < 2e-3f);
         }
     }
-    std::cout << "  ✓ MultiHeadMLP joint gradient check passed!\n";
+    std::cout << "  ✓ 4-Head MultiHeadMLP joint gradient check passed!\n";
 }
 
 void test_calibration_metrics() {

@@ -68,12 +68,12 @@ int main() {
 
     std::cout << "\033[1m[1] Configuração da Arquitetura Multi-Head\033[0m\n";
     std::vector<tso::LayerConfig> trunk_topology = {
-        {18, 32, tso::Activation::GELU},
+        {24, 32, tso::Activation::GELU},
         {32, 16, tso::Activation::GELU}
     };
 
     tso::MultiHeadMLP model(trunk_topology, 16, 4, 7, rng);
-    std::cout << std::format("  • Trunk: 18 -> 32 (GELU) -> 16 (GELU)\n");
+    std::cout << std::format("  • Trunk: 24 -> 32 (GELU) -> 16 (GELU)\n");
     std::cout << std::format("  • Choice Head: 16 -> 4 (Softmax)\n");
     std::cout << std::format("  • Noul Head:   16 -> 7 (Softmax)\n");
     std::cout << std::format("  • Score Head:  16 -> 1 (Sigmoid)\n");
@@ -132,7 +132,7 @@ int main() {
                 for (auto& g : d_n) g *= scale;
                 for (auto& g : d_s) g = g * 2.0f * scale;
 
-                model.backward(d_c, d_n, d_s);
+                model.backward(d_c, d_n, d_s, tso::Vector{0.0f});
             }
 
             model.update(optimizer);

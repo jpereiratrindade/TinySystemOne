@@ -44,8 +44,6 @@ public:
 
 class MSELoss {
 public:
-    // Mean Squared Error: L(pred, target) = (pred - target)^2
-    // dL/dpred = 2 * (pred - target)
     static LossResult compute(const Vector& pred, const Vector& target) {
         Scalar loss = 0.0f;
         Vector dpred(pred.size());
@@ -60,6 +58,32 @@ public:
     static LossResult compute_scalar(Scalar pred, Scalar target) {
         const Scalar diff = pred - target;
         return {diff * diff, Vector{2.0f * diff}};
+    }
+};
+
+struct NLLResult {
+    Scalar loss{0.0f};
+    Vector d_mu;
+    Vector d_var;
+};
+
+class GaussianNLLLoss {
+public:
+    static constexpr Scalar kEps = 1e-6f;
+
+    // L(mu, var, y) = 0.5 * (mu - y)^2 / var + 0.5 * ln(var)
+    // dL/dmu = (mu - y) / var
+    // dL/dvar = -0.5 * (mu - y)^2 / var^2 + 0.5 / var
+    static NLLResult compute(Scalar mu, Scalar var, Scalar target) {
+        const Scalar clamped_var = std::max(var, kEps);
+        const Scalar diff = mu - target;
+        const Scalar diff_sq = diff * diff;
+        
+        const Scalar loss = 0.5f * (diff_sq / clamped_var) + 0.5f * std::log(clamped_var);
+        const Scalar d_mu = diff / clamped_var;
+        const Scalar d_var = -0.5f * (diff_sq / (clamped_var * clamped_var)) + 0.5f / clamped_var;
+
+        return {loss, Vector{d_mu}, Vector{d_var}};
     }
 };
 

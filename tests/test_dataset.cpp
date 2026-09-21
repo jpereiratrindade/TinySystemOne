@@ -22,11 +22,12 @@ void test_state_encoding_and_triple_judgment() {
     };
 
     tso::Vector x = nominal_state.encode();
-    TSO_ASSERT(x.size() == 18);
+    TSO_ASSERT(x.size() == 24);
     auto j_nom = nominal_state.evaluate_judgment();
     TSO_ASSERT(j_nom.choice == tso::Choice::Nominal);
     TSO_ASSERT(j_nom.noul == tso::Noul::None);
     TSO_ASSERT(j_nom.score >= 0.99f);
+    TSO_ASSERT(j_nom.uncertainty <= 0.05f);
 
     // Inconsistent state check (declaration mismatch)
     tso::StructuredState inconsistent_decl{
@@ -56,27 +57,37 @@ void test_state_encoding_and_triple_judgment() {
     TSO_ASSERT(j_deg.noul == tso::Noul::Witness);
     TSO_ASSERT(j_deg.score >= 0.4f && j_deg.score <= 0.6f);
 
-    std::cout << "  ✓ Triple judgment rules passed!\n";
+    // Missing mask check: 4 fields missing -> Unknown with high uncertainty
+    tso::PresenceMask mask;
+    mask.declared = false;
+    mask.registered = false;
+    mask.witness = false;
+    mask.health = false;
+    auto j_missing = nominal_state.evaluate_judgment_with_mask(mask);
+    TSO_ASSERT(j_missing.choice == tso::Choice::Unknown);
+    TSO_ASSERT(j_missing.uncertainty >= 0.20f);
+
+    std::cout << "  ✓ Triple judgment and missing mask rules passed!\n";
 }
 
 void test_dataset_generator() {
     std::cout << "[TEST] Running test_dataset_generator...\n";
-    auto split = tso::DatasetGenerator::generate_exp001(100, 42);
+    auto split = tso::DatasetGenerator::generate_exp003(100, 42);
 
     TSO_ASSERT(!split.train.empty());
     TSO_ASSERT(!split.val.empty());
     TSO_ASSERT(!split.test.empty());
-    TSO_ASSERT(!split.ood.empty());
 
     for (const auto& sample : split.train) {
-        TSO_ASSERT(sample.x.size() == 18);
+        TSO_ASSERT(sample.x.size() == 24);
         TSO_ASSERT(sample.y < 4);
         TSO_ASSERT(sample.noul_target < 7);
         TSO_ASSERT(sample.score_target >= 0.0f && sample.score_target <= 1.0f);
+        TSO_ASSERT(sample.uncertainty_target > 0.0f);
     }
     std::cout << "  ✓ Dataset generator split passed (Train: " 
               << split.train.size() << ", Val: " << split.val.size()
-              << ", Test: " << split.test.size() << ", OOD: " << split.ood.size() << ")!\n";
+              << ", Test: " << split.test.size() << ")!\n";
 }
 
 int main() {
