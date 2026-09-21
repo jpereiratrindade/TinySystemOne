@@ -10,9 +10,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Optimization and Warning flags
+option(ENABLE_SANITIZERS "Enable Address and Undefined Behavior sanitizers in Debug" OFF)
+
+# Compiler Warning Flags
 if(MSVC)
-    add_compile_options(/W4 /O2 /permissive-)
+    add_compile_options(/W4 /permissive-)
 else()
     add_compile_options(
         -Wall
@@ -20,8 +22,12 @@ else()
         -Wpedantic
         -Wconversion
         -Wsign-conversion
-        -O3
     )
+
+    if(ENABLE_SANITIZERS AND CMAKE_BUILD_TYPE MATCHES "Debug")
+        add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
+        add_link_options(-fsanitize=address,undefined)
+    endif()
 endif()
 
 # Include directories
@@ -40,16 +46,20 @@ target_include_directories(tso_exp003 PRIVATE include)
 add_executable(tso_exp004 src/exp004_main.cpp)
 target_include_directories(tso_exp004 PRIVATE include)
 
-# Unit Tests Targets
+# Unit & Acceptance Tests Targets
 add_executable(test_math tests/test_math.cpp)
 target_include_directories(test_math PRIVATE include)
 
 add_executable(test_dataset tests/test_dataset.cpp)
 target_include_directories(test_dataset PRIVATE include)
 
+add_executable(test_acceptance tests/test_acceptance.cpp)
+target_include_directories(test_acceptance PRIVATE include)
+
 enable_testing()
 add_test(NAME TestMath COMMAND test_math)
 add_test(NAME TestDataset COMMAND test_dataset)
+add_test(NAME TestAcceptance COMMAND test_acceptance)
 add_test(NAME Exp001 COMMAND tso_exp001)
 add_test(NAME Exp002 COMMAND tso_exp002)
 add_test(NAME Exp003 COMMAND tso_exp003)

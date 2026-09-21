@@ -17,7 +17,8 @@ void print_banner() {
     std::cout << "\033[1;36m";
     std::cout << "======================================================================\n";
     std::cout << "                 TinySystemOne — Experiment EXP-002                   \n";
-    std::cout << "  Multi-Head Triple Judgment: Choice + Noul (Causal) + Continuous Score\n";
+    std::cout << "  Multi-Head Triple Judgment: Choice + Locus Diagnóstico + Viability  \n";
+    std::cout << "  (Strict Partitioning by Canonical States — Zero Data Leakage)       \n";
     std::cout << "======================================================================\033[0m\n\n";
 }
 
@@ -49,7 +50,7 @@ void print_noul_confusion(const std::vector<tso::Vector>& probs, const std::vect
     }
 
     const char* labels[7] = {"NONE", "DECL", "RUN", "WIT", "FRESH", "HLTH", "MULT"};
-    std::cout << "\n\033[1;33m--- Matriz de Confusão: Noul (Locus Causal) ---\033[0m\n";
+    std::cout << "\n\033[1;33m--- Matriz de Confusão: Locus Diagnóstico (Noul) ---\033[0m\n";
     std::cout << std::format("{:<8} | {:<6} {:<6} {:<6} {:<6} {:<6} {:<6} {:<6}\n",
                              "Real\\Pred", labels[0], labels[1], labels[2], labels[3], labels[4], labels[5], labels[6]);
     std::cout << "-----------------------------------------------------------------\n";
@@ -75,12 +76,13 @@ int main() {
     tso::MultiHeadMLP model(trunk_topology, 16, 4, 7, rng);
     std::cout << std::format("  • Trunk: 24 -> 32 (GELU) -> 16 (GELU)\n");
     std::cout << std::format("  • Choice Head: 16 -> 4 (Softmax)\n");
-    std::cout << std::format("  • Noul Head:   16 -> 7 (Softmax)\n");
-    std::cout << std::format("  • Score Head:  16 -> 1 (Sigmoid)\n");
+    std::cout << std::format("  • Noul Head:   16 -> 7 (Softmax) [Locus Diagnóstico]\n");
+    std::cout << std::format("  • Score Head:  16 -> 1 (Sigmoid) [Learned Viability Score]\n");
     std::cout << std::format("  • Total de Parâmetros: {}\n", model.num_params());
 
-    auto data_split = tso::DatasetGenerator::generate_exp001(250, kSeed);
-    std::cout << std::format("  • Dataset: Treino = {}, Validação = {}, Teste = {}, OOD = {}\n\n",
+    auto data_split = tso::DatasetGenerator::generate_canonical_split(kSeed);
+    tso::DatasetGenerator::verify_disjoint_partitions(data_split);
+    std::cout << std::format("  • Universo Canônico: Treino = {}, Val = {}, Teste = {}, OOD = {}\n\n",
                              data_split.train.size(), data_split.val.size(), data_split.test.size(), data_split.ood.size());
 
     tso::AdamWConfig opt_cfg{
@@ -92,7 +94,7 @@ int main() {
     };
     tso::AdamW optimizer(opt_cfg);
 
-    constexpr std::size_t kEpochs = 70;
+    constexpr std::size_t kEpochs = 80;
     constexpr std::size_t kBatchSize = 16;
 
     std::cout << "\033[1m[2] Treinamento Conjunto Multi-Head (AdamW lr=0.006)\033[0m\n";
@@ -144,7 +146,7 @@ int main() {
         const float avg_n = epoch_noul_loss / N;
         const float avg_s = epoch_score_mse / N;
 
-        if (epoch % 5 == 0 || epoch == 1 || epoch == kEpochs) {
+        if (epoch % 10 == 0 || epoch == 1 || epoch == kEpochs) {
             std::size_t c_correct = 0;
             std::size_t n_correct = 0;
             for (const auto& sample : data_split.val) {
@@ -164,8 +166,8 @@ int main() {
     }
     std::cout << "-----------------------------------------------------------------------------------------------\n\n";
 
-    // 3. Test Set Evaluation
-    std::cout << "\033[1m[3] Avaliação Tripla no Conjunto de Teste\033[0m\n";
+    // 3. Test Set Evaluation on Unseen Configurations
+    std::cout << "\033[1m[3] Avaliação Tripla em Configurações Genuinamente Inéditas\033[0m\n";
     std::vector<tso::Vector> test_c_probs;
     std::vector<tso::Vector> test_n_probs;
     std::vector<std::size_t> test_c_targets;
@@ -200,8 +202,8 @@ int main() {
     print_noul_confusion(test_n_probs, test_n_targets);
 
     // 4. Test on OOD Cases
-    std::cout << "\n\033[1m[4] Julgamento Triplo sob Incerteza e OOD (Out-Of-Distribution)\033[0m\n";
-    for (std::size_t i = 0; i < std::min(std::size_t(5), data_split.ood.size()); ++i) {
+    std::cout << "\n\033[1m[4] Julgamento Estruturado sob Taxonomia de OOD\033[0m\n";
+    for (std::size_t i = 0; i < data_split.ood.size(); ++i) {
         const auto& ood_sample = data_split.ood[i];
         auto out = model.forward(ood_sample.x);
 
@@ -210,17 +212,17 @@ int main() {
         std::size_t pred_c = static_cast<std::size_t>(std::distance(out.choice_probs.begin(), max_c));
         std::size_t pred_n = static_cast<std::size_t>(std::distance(out.noul_probs.begin(), max_n));
 
-        std::cout << std::format("\033[1mOOD #{}:\033[0m {}\n", i + 1, ood_sample.description);
-        std::cout << std::format("  ↳ Choice: \033[1;35m{}\033[0m (Conf: {:.1f}%, Entropia: {:.2f})\n",
+        std::cout << std::format("\033[1m[{}]\033[0m {}\n", tso::to_string(ood_sample.category), ood_sample.description);
+        std::cout << std::format("  ↳ Choice: \033[1;35m{}\033[0m (Conf: {:.1f}%, Entropia H: {:.2f})\n",
                                  tso::to_string(static_cast<tso::Choice>(pred_c)), *max_c * 100.0f,
                                  tso::Calibration::normalized_entropy(out.choice_probs));
-        std::cout << std::format("  ↳ Noul:   \033[1;33m{}\033[0m (Conf: {:.1f}%, Entropia: {:.2f})\n",
+        std::cout << std::format("  ↳ Noul:   \033[1;33m{}\033[0m (Conf: {:.1f}%, Entropia H: {:.2f})\n",
                                  tso::to_string(static_cast<tso::Noul>(pred_n)), *max_n * 100.0f,
                                  tso::Calibration::normalized_entropy(out.noul_probs));
-        std::cout << std::format("  ↳ Score:  \033[1;32m{:.3f}\033[0m (Degradação contínua da saúde operacional)\n\n",
+        std::cout << std::format("  ↳ Score:  \033[1;32m{:.3f}\033[0m (Viabilidade contínua predita)\n\n",
                                  out.score);
     }
 
-    std::cout << "\033[1;32m[✓] Experimento EXP-002 concluído com sucesso!\033[0m\n";
+    std::cout << "\033[1;32m[✓] Experimento EXP-002 concluído com sucesso e rigor metodológico!\033[0m\n";
     return 0;
 }

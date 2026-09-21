@@ -10,6 +10,20 @@
         } \
     } while (0)
 
+void test_canonical_universe() {
+    std::cout << "[TEST] Running test_canonical_universe...\n";
+    auto universe = tso::DatasetGenerator::generate_canonical_universe();
+    TSO_ASSERT(universe.size() == 576);
+
+    std::unordered_set<std::size_t> unique_ids;
+    for (const auto& st : universe) {
+        TSO_ASSERT(st.state_id() < 576);
+        unique_ids.insert(st.state_id());
+    }
+    TSO_ASSERT(unique_ids.size() == 576);
+    std::cout << "  ✓ Canonical universe generated with exactly 576 unique discrete configurations!\n";
+}
+
 void test_state_encoding_and_triple_judgment() {
     std::cout << "[TEST] Running test_state_encoding_and_triple_judgment...\n";
     tso::StructuredState nominal_state{
@@ -70,13 +84,17 @@ void test_state_encoding_and_triple_judgment() {
     std::cout << "  ✓ Triple judgment and missing mask rules passed!\n";
 }
 
-void test_dataset_generator() {
-    std::cout << "[TEST] Running test_dataset_generator...\n";
-    auto split = tso::DatasetGenerator::generate_exp003(100, 42);
+void test_disjoint_dataset_generator() {
+    std::cout << "[TEST] Running test_disjoint_dataset_generator...\n";
+    auto split = tso::DatasetGenerator::generate_canonical_split(42);
 
     TSO_ASSERT(!split.train.empty());
     TSO_ASSERT(!split.val.empty());
     TSO_ASSERT(!split.test.empty());
+    TSO_ASSERT(!split.ood.empty());
+
+    // Verify zero data leakage
+    tso::DatasetGenerator::verify_disjoint_partitions(split);
 
     for (const auto& sample : split.train) {
         TSO_ASSERT(sample.x.size() == 24);
@@ -85,15 +103,16 @@ void test_dataset_generator() {
         TSO_ASSERT(sample.score_target >= 0.0f && sample.score_target <= 1.0f);
         TSO_ASSERT(sample.uncertainty_target > 0.0f);
     }
-    std::cout << "  ✓ Dataset generator split passed (Train: " 
+    std::cout << "  ✓ Disjoint dataset generator passed (Train: " 
               << split.train.size() << ", Val: " << split.val.size()
-              << ", Test: " << split.test.size() << ")!\n";
+              << ", Test: " << split.test.size() << ", OOD: " << split.ood.size() << ") with zero state overlap!\n";
 }
 
 int main() {
     std::cout << "=== TinySystemOne Dataset Unit Tests ===\n";
+    test_canonical_universe();
     test_state_encoding_and_triple_judgment();
-    test_dataset_generator();
+    test_disjoint_dataset_generator();
     std::cout << "All dataset tests passed successfully!\n";
     return 0;
 }

@@ -1,0 +1,46 @@
+name: TinySystemOne CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build_and_test:
+    name: Build & Test (GCC & Clang)
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        compiler: [g++, clang++]
+        build_type: [Release, Debug]
+        include:
+          - compiler: g++
+            c_compiler: gcc
+          - compiler: clang++
+            c_compiler: clang
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build cmake
+
+      - name: Configure CMake
+        env:
+          CC: ${{ matrix.c_compiler }}
+          CXX: ${{ matrix.compiler }}
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DENABLE_SANITIZERS=${{ matrix.build_type == 'Debug' && 'ON' || 'OFF' }}
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Run CTest Suite
+        run: ctest --test-dir build --output-on-failure

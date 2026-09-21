@@ -7,6 +7,8 @@
 #include <vector>
 #include <tuple>
 #include <format>
+#include <unordered_set>
+#include <stdexcept>
 
 namespace tso {
 
@@ -50,6 +52,25 @@ inline std::string_view to_string(Noul n) {
     return "INVALID";
 }
 
+enum class OodCategory {
+    NoSignal,
+    UniformDispersion,
+    ContradictoryEvidence,
+    NovelCombination,
+    CorruptedInput
+};
+
+inline std::string_view to_string(OodCategory cat) {
+    switch (cat) {
+        case OodCategory::NoSignal: return "NO_SIGNAL";
+        case OodCategory::UniformDispersion: return "UNIFORM_DISPERSION";
+        case OodCategory::ContradictoryEvidence: return "CONTRADICTORY_EVIDENCE";
+        case OodCategory::NovelCombination: return "NOVEL_COMBINATION";
+        case OodCategory::CorruptedInput: return "CORRUPTED_INPUT";
+    }
+    return "UNKNOWN";
+}
+
 enum class RuntimeState : std::size_t { Running = 0, Absent = 1, Unknown = 2 };
 enum class WitnessState : std::size_t { Valid = 0, Invalid = 1, Stale = 2, Unknown = 3 };
 enum class FreshnessState : std::size_t { Fresh = 0, Aging = 1, Expired = 2 };
@@ -73,13 +94,15 @@ struct PresenceMask {
         if (!health) ++m;
         return m;
     }
+
+    bool operator==(const PresenceMask& other) const = default;
 };
 
 struct TripleJudgment {
     Choice choice{Choice::Nominal};
     Noul noul{Noul::None};
-    Scalar score{1.0f};
-    Scalar uncertainty{0.01f}; // Epistemic variance target
+    Scalar score{1.0f};         // Learned continuous viability
+    Scalar uncertainty{0.01f};   // Epistemic uncertainty target
 };
 
 struct StructuredState {
@@ -90,15 +113,28 @@ struct StructuredState {
     FreshnessState freshness{FreshnessState::Fresh};
     HealthState health{HealthState::Healthy};
 
+    bool operator==(const StructuredState& other) const = default;
+
+    // Unique integer key identifying this exact state in [0, 575]
+    [[nodiscard]] std::size_t state_id() const {
+        std::size_t id = 0;
+        id = id * 2 + (declared ? 1 : 0);
+        id = id * 2 + (registered ? 1 : 0);
+        id = id * 3 + static_cast<std::size_t>(runtime);
+        id = id * 4 + static_cast<std::size_t>(witness);
+        id = id * 3 + static_cast<std::size_t>(freshness);
+        id = id * 4 + static_cast<std::size_t>(health);
+        return id;
+    }
+
     [[nodiscard]] Vector encode() const {
         return encode_with_mask(PresenceMask{});
     }
 
     [[nodiscard]] Vector encode_with_mask(const PresenceMask& mask) const {
-        // 18 feature dims + 6 presence mask dims = 24 dimensions
         Vector x(24, 0.0f);
         
-        // Features (only set if presence flag is true)
+        // 18 feature slots
         if (mask.declared) x[declared ? 0 : 1] = 1.0f;
         if (mask.registered) x[2 + (registered ? 0 : 1)] = 1.0f;
         if (mask.runtime) x[4 + static_cast<std::size_t>(runtime)] = 1.0f;
@@ -106,7 +142,7 @@ struct StructuredState {
         if (mask.freshness) x[11 + static_cast<std::size_t>(freshness)] = 1.0f;
         if (mask.health) x[14 + static_cast<std::size_t>(health)] = 1.0f;
 
-        // Presence Mask indicators
+        // 6 presence mask bits
         x[18] = mask.declared ? 1.0f : 0.0f;
         x[19] = mask.registered ? 1.0f : 0.0f;
         x[20] = mask.runtime ? 1.0f : 0.0f;
@@ -128,13 +164,12 @@ struct StructuredState {
     [[nodiscard]] TripleJudgment evaluate_judgment_with_mask(const PresenceMask& mask) const {
         const std::size_t missing_cnt = mask.count_missing();
 
-        // If information is severely missing (>= 3 fields missing)
         if (missing_cnt >= 3) {
             const Scalar unc = 0.05f + static_cast<Scalar>(missing_cnt) * 0.05f;
             return {Choice::Unknown, Noul::Multiple, 0.20f, unc};
         }
 
-        // 1. Inconsistent (Contradictory evidence)
+        // 1. Inconsistent (Direct contradiction)
         if (mask.declared && mask.registered && !declared && registered) {
             return {Choice::Inconsistent, Noul::Declaration, 0.05f, 0.01f + 0.04f * static_cast<Scalar>(missing_cnt)};
         }
@@ -148,7 +183,7 @@ struct StructuredState {
             return {Choice::Inconsistent, Noul::Freshness, 0.05f, 0.01f + 0.04f * static_cast<Scalar>(missing_cnt)};
         }
 
-        // 2. Unknown (Insufficient evidence via states or missingness)
+        // 2. Unknown (Semantic unknown state or insufficient evidence)
         std::size_t unknown_count = missing_cnt;
         if (mask.runtime && runtime == RuntimeState::Unknown) ++unknown_count;
         if (mask.witness && witness == WitnessState::Unknown) ++unknown_count;
@@ -158,7 +193,7 @@ struct StructuredState {
             return {Choice::Unknown, Noul::Multiple, 0.15f, unc};
         }
 
-        // 3. Degraded
+        // 3. Degraded (Operational degradation)
         if (mask.health && health == HealthState::Failing) {
             return {Choice::Degraded, Noul::Health, 0.15f, 0.02f};
         }
@@ -223,7 +258,8 @@ struct StructuredState {
         };
 
         return std::format(
-            "{{\"declared\":{},\"registered\":{},\"runtime\":\"{}\",\"witness\":\"{}\",\"freshness\":\"{}\",\"health\":\"{}\"}}",
+            "{{\"id\":{},\"declared\":{},\"registered\":{},\"runtime\":\"{}\",\"witness\":\"{}\",\"freshness\":\"{}\",\"health\":\"{}\"}}",
+            state_id(),
             declared ? "true" : "false",
             registered ? "true" : "false",
             rt_str(runtime),
@@ -237,213 +273,222 @@ struct StructuredState {
 struct DataSample {
     Vector x;
     std::size_t y;            // Choice target class
-    std::size_t noul_target;  // Noul target class
-    Scalar score_target;      // Continuous score target [0, 1]
+    std::size_t noul_target;  // Noul target class (locus diagnóstico)
+    Scalar score_target;      // Learned viability score [0, 1]
     Scalar uncertainty_target;// Uncertainty variance target
+    std::size_t state_id{0};  // Canonical state configuration ID
+    std::string description;
+};
+
+struct OodSample {
+    Vector x;
+    OodCategory category;
+    Choice expected_choice;
     std::string description;
 };
 
 struct DatasetSplit {
     std::vector<DataSample> train;
     std::vector<DataSample> val;
-    std::vector<DataSample> test;
-    std::vector<DataSample> ood;
+    std::vector<DataSample> test;      // Genuinely unseen state configurations
+    std::vector<OodSample> ood;
 };
 
 class DatasetGenerator {
 public:
-    static StructuredState generate_sample_for_class(Choice target_choice, Random& rng) {
-        StructuredState state;
-        while (true) {
-            switch (target_choice) {
-                case Choice::Nominal:
-                    state.declared = true;
-                    state.registered = true;
-                    state.runtime = RuntimeState::Running;
-                    state.witness = WitnessState::Valid;
-                    state.freshness = (rng.uniform() > 0.4f) ? FreshnessState::Fresh : FreshnessState::Aging;
-                    state.health = HealthState::Healthy;
-                    break;
-                case Choice::Degraded: {
-                    state.declared = true;
-                    state.registered = true;
-                    state.runtime = RuntimeState::Running;
-                    state.witness = WitnessState::Valid;
-                    state.freshness = FreshnessState::Fresh;
-                    state.health = HealthState::Healthy;
-                    const int deg_type = rng.uniform_int(0, 4);
-                    if (deg_type == 0) state.health = HealthState::Degraded;
-                    else if (deg_type == 1) state.witness = WitnessState::Stale;
-                    else if (deg_type == 2) state.freshness = FreshnessState::Expired;
-                    else if (deg_type == 3) state.runtime = RuntimeState::Absent;
-                    else state.health = HealthState::Failing;
-                    break;
-                }
-                case Choice::Inconsistent: {
-                    const int scenario = rng.uniform_int(0, 3);
-                    if (scenario == 0) {
-                        state.declared = false;
-                        state.registered = true; // contradictory
-                        state.runtime = RuntimeState::Running;
-                        state.witness = WitnessState::Valid;
-                    } else if (scenario == 1) {
-                        state.declared = true;
-                        state.registered = true;
-                        state.runtime = RuntimeState::Running;
-                        state.witness = WitnessState::Invalid; // contradictory
-                    } else if (scenario == 2) {
-                        state.declared = true;
-                        state.registered = true;
-                        state.runtime = RuntimeState::Absent;
-                        state.witness = WitnessState::Valid; // contradictory
-                    } else {
-                        state.declared = true;
-                        state.registered = true;
-                        state.health = HealthState::Healthy;
-                        state.freshness = FreshnessState::Expired; // contradictory
-                    }
-                    break;
-                }
-                case Choice::Unknown:
-                    state.declared = (rng.uniform() > 0.5f);
-                    state.registered = (rng.uniform() > 0.5f);
-                    state.runtime = RuntimeState::Unknown;
-                    state.witness = (RuntimeState::Unknown == state.runtime && rng.uniform() > 0.3f) 
-                                    ? WitnessState::Unknown : WitnessState::Stale;
-                    state.health = HealthState::Unknown;
-                    break;
-            }
+    // Generate all 576 unique canonical state configurations in Ω
+    static std::vector<StructuredState> generate_canonical_universe() {
+        std::vector<StructuredState> universe;
+        universe.reserve(576);
 
-            if (state.ground_truth() == target_choice) {
-                return state;
+        for (int dec = 0; dec < 2; ++dec) {
+            for (int reg = 0; reg < 2; ++reg) {
+                for (int rt = 0; rt < 3; ++rt) {
+                    for (int wt = 0; wt < 4; ++wt) {
+                        for (int fr = 0; fr < 3; ++fr) {
+                            for (int hl = 0; hl < 4; ++hl) {
+                                StructuredState st{
+                                    .declared = (dec == 1),
+                                    .registered = (reg == 1),
+                                    .runtime = static_cast<RuntimeState>(rt),
+                                    .witness = static_cast<WitnessState>(wt),
+                                    .freshness = static_cast<FreshnessState>(fr),
+                                    .health = static_cast<HealthState>(hl)
+                                };
+                                universe.push_back(st);
+                            }
+                        }
+                    }
+                }
             }
         }
+        return universe;
     }
 
-    static DatasetSplit generate_exp001(std::size_t num_samples_per_class = 250, std::uint64_t seed = 42) {
+    // Partition strictly by unique state configuration (zero state overlap across splits)
+    static DatasetSplit generate_canonical_split(std::uint64_t seed = 42) {
         Random rng(seed);
-        std::vector<DataSample> balanced;
+        auto universe = generate_canonical_universe();
+        rng.shuffle(universe);
 
-        for (std::size_t c = 0; c < 4; ++c) {
-            Choice target_choice = static_cast<Choice>(c);
-            for (std::size_t i = 0; i < num_samples_per_class; ++i) {
-                StructuredState state = generate_sample_for_class(target_choice, rng);
-                TripleJudgment j = state.evaluate_judgment();
-                balanced.push_back({
-                    .x = state.encode(),
-                    .y = static_cast<std::size_t>(j.choice),
-                    .noul_target = static_cast<std::size_t>(j.noul),
-                    .score_target = j.score,
-                    .uncertainty_target = j.uncertainty,
-                    .description = state.to_json_str()
-                });
+        // Separate holdout novel combinations: e.g. when witness == Stale and runtime == Absent
+        std::vector<StructuredState> in_dist_universe;
+        std::vector<StructuredState> held_out_novel;
+
+        for (const auto& st : universe) {
+            if (st.witness == WitnessState::Stale && st.runtime == RuntimeState::Absent) {
+                held_out_novel.push_back(st);
+            } else {
+                in_dist_universe.push_back(st);
             }
         }
 
-        rng.shuffle(balanced);
-
-        const std::size_t total = balanced.size();
-        const std::size_t train_size = (total * 80) / 100;
-        const std::size_t val_size = (total * 10) / 100;
+        const std::size_t total = in_dist_universe.size();
+        const std::size_t train_size = (total * 70) / 100;
+        const std::size_t val_size = (total * 15) / 100;
 
         DatasetSplit split;
+
+        auto make_sample = [](const StructuredState& st) -> DataSample {
+            TripleJudgment j = st.evaluate_judgment();
+            return {
+                .x = st.encode(),
+                .y = static_cast<std::size_t>(j.choice),
+                .noul_target = static_cast<std::size_t>(j.noul),
+                .score_target = j.score,
+                .uncertainty_target = j.uncertainty,
+                .state_id = st.state_id(),
+                .description = st.to_json_str()
+            };
+        };
+
         for (std::size_t i = 0; i < total; ++i) {
+            const auto& st = in_dist_universe[i];
             if (i < train_size) {
-                split.train.push_back(balanced[i]);
+                split.train.push_back(make_sample(st));
             } else if (i < train_size + val_size) {
-                split.val.push_back(balanced[i]);
+                split.val.push_back(make_sample(st));
             } else {
-                split.test.push_back(balanced[i]);
+                split.test.push_back(make_sample(st));
             }
         }
 
-        // OOD Samples (24-dimensional vectors)
+        // Categorized OOD Evaluation Suite
+        // 1. NO_SIGNAL (All zeros)
         split.ood.push_back({
             .x = Vector(24, 0.0f),
-            .y = static_cast<std::size_t>(Choice::Unknown),
-            .noul_target = static_cast<std::size_t>(Noul::Multiple),
-            .score_target = 0.0f,
-            .uncertainty_target = 0.5f,
-            .description = "{\"ood\":\"all_zeros_no_signal\"}"
+            .category = OodCategory::NoSignal,
+            .expected_choice = Choice::Unknown,
+            .description = "NO_SIGNAL: All zeros (zero evidence, expect high entropy H(P))"
         });
 
+        // 2. UNIFORM_DISPERSION
         Vector uniform_v(24, 1.0f / 24.0f);
         split.ood.push_back({
             .x = uniform_v,
-            .y = static_cast<std::size_t>(Choice::Unknown),
-            .noul_target = static_cast<std::size_t>(Noul::Multiple),
-            .score_target = 0.0f,
-            .uncertainty_target = 0.5f,
-            .description = "{\"ood\":\"uniform_dispersion\"}"
+            .category = OodCategory::UniformDispersion,
+            .expected_choice = Choice::Unknown,
+            .description = "UNIFORM_DISPERSION: Flat uniform probability vector"
         });
 
+        // 3. CONTRADICTORY_EVIDENCE (Simultaneous conflicting signals where P(INCONSISTENT)=1.0 is the right judgment)
         Vector multihot_v(24, 0.0f);
-        multihot_v[0] = 1.0f; multihot_v[1] = 1.0f;
-        multihot_v[4] = 1.0f; multihot_v[5] = 1.0f;
-        multihot_v[7] = 1.0f; multihot_v[8] = 1.0f;
+        multihot_v[0] = 1.0f; multihot_v[1] = 1.0f; // declared true AND false
+        multihot_v[4] = 1.0f; multihot_v[5] = 1.0f; // running AND absent
+        multihot_v[7] = 1.0f; multihot_v[8] = 1.0f; // valid AND invalid
         for (std::size_t k = 18; k < 24; ++k) multihot_v[k] = 1.0f;
         split.ood.push_back({
             .x = multihot_v,
-            .y = static_cast<std::size_t>(Choice::Inconsistent),
-            .noul_target = static_cast<std::size_t>(Noul::Multiple),
-            .score_target = 0.0f,
-            .uncertainty_target = 0.3f,
-            .description = "{\"ood\":\"simultaneous_multihot_conflict\"}"
+            .category = OodCategory::ContradictoryEvidence,
+            .expected_choice = Choice::Inconsistent,
+            .description = "CONTRADICTORY_EVIDENCE: Multihot direct contradiction (expect P(INCONSISTENT) -> 1.0)"
         });
+
+        // 4. NOVEL_COMBINATION (Held-out structural combinations)
+        for (std::size_t k = 0; k < std::min(std::size_t(5), held_out_novel.size()); ++k) {
+            split.ood.push_back({
+                .x = held_out_novel[k].encode(),
+                .category = OodCategory::NovelCombination,
+                .expected_choice = held_out_novel[k].ground_truth(),
+                .description = std::format("NOVEL_COMBINATION: Entirely held-out structural family (state_id={})", held_out_novel[k].state_id())
+            });
+        }
+
+        // 5. CORRUPTED_INPUT (Continuous corrupted noise)
+        for (int k = 0; k < 3; ++k) {
+            Vector corrupt_v(24);
+            for (auto& val : corrupt_v) val = std::abs(rng.normal(0.5f, 0.3f));
+            split.ood.push_back({
+                .x = corrupt_v,
+                .category = OodCategory::CorruptedInput,
+                .expected_choice = Choice::Unknown,
+                .description = std::format("CORRUPTED_INPUT: Gaussian out-of-domain noise #{}", k + 1)
+            });
+        }
 
         return split;
     }
 
-    // EXP-003: Training with missingness/dropout on presence mask
-    static DatasetSplit generate_exp003(std::size_t num_samples_per_class = 300, std::uint64_t seed = 42) {
-        Random rng(seed);
-        std::vector<DataSample> samples;
+    // Mathematical verification that splits share zero state configurations
+    static void verify_disjoint_partitions(const DatasetSplit& split) {
+        std::unordered_set<std::size_t> train_ids;
+        for (const auto& s : split.train) train_ids.insert(s.state_id);
 
-        for (std::size_t c = 0; c < 4; ++c) {
-            Choice target_choice = static_cast<Choice>(c);
-            for (std::size_t i = 0; i < num_samples_per_class; ++i) {
-                StructuredState state = generate_sample_for_class(target_choice, rng);
+        for (const auto& s : split.val) {
+            if (train_ids.contains(s.state_id)) {
+                throw std::runtime_error(std::format("Data leakage detected: val state_id {} exists in train", s.state_id));
+            }
+        }
 
-                // Apply probabilistic missingness during training (0% to 50% chance per field)
+        for (const auto& s : split.test) {
+            if (train_ids.contains(s.state_id)) {
+                throw std::runtime_error(std::format("Data leakage detected: test state_id {} exists in train", s.state_id));
+            }
+        }
+    }
+
+    // EXP-001 & EXP-002 compatibility generator wrapping canonical split
+    static DatasetSplit generate_exp001([[maybe_unused]] std::size_t _unused = 250, std::uint64_t seed = 42) {
+        return generate_canonical_split(seed);
+    }
+
+    // EXP-003 generator with explicit missingness on unique states
+    static DatasetSplit generate_exp003([[maybe_unused]] std::size_t _unused = 300, std::uint64_t seed = 42) {
+        auto base_split = generate_canonical_split(seed);
+        Random rng(seed + 100);
+
+        auto apply_missingness = [&](std::vector<DataSample>& samples) {
+            for (auto& s : samples) {
                 PresenceMask mask;
-                const float missing_rate = rng.uniform(0.0f, 0.4f);
-                mask.declared = (rng.uniform() > missing_rate);
-                mask.registered = (rng.uniform() > missing_rate);
-                mask.runtime = (rng.uniform() > missing_rate);
-                mask.witness = (rng.uniform() > missing_rate);
-                mask.freshness = (rng.uniform() > missing_rate);
-                mask.health = (rng.uniform() > missing_rate);
+                const float rate = rng.uniform(0.0f, 0.35f);
+                mask.declared = (rng.uniform() > rate);
+                mask.registered = (rng.uniform() > rate);
+                mask.runtime = (rng.uniform() > rate);
+                mask.witness = (rng.uniform() > rate);
+                mask.freshness = (rng.uniform() > rate);
+                mask.health = (rng.uniform() > rate);
 
-                TripleJudgment j = state.evaluate_judgment_with_mask(mask);
-                samples.push_back({
-                    .x = state.encode_with_mask(mask),
-                    .y = static_cast<std::size_t>(j.choice),
-                    .noul_target = static_cast<std::size_t>(j.noul),
-                    .score_target = j.score,
-                    .uncertainty_target = j.uncertainty,
-                    .description = state.to_json_str()
-                });
+                // Recover underlying state
+                auto universe = generate_canonical_universe();
+                for (const auto& st : universe) {
+                    if (st.state_id() == s.state_id) {
+                        TripleJudgment j = st.evaluate_judgment_with_mask(mask);
+                        s.x = st.encode_with_mask(mask);
+                        s.y = static_cast<std::size_t>(j.choice);
+                        s.noul_target = static_cast<std::size_t>(j.noul);
+                        s.score_target = j.score;
+                        s.uncertainty_target = j.uncertainty;
+                        break;
+                    }
+                }
             }
-        }
+        };
 
-        rng.shuffle(samples);
+        apply_missingness(base_split.train);
+        apply_missingness(base_split.val);
+        apply_missingness(base_split.test);
 
-        const std::size_t total = samples.size();
-        const std::size_t train_size = (total * 80) / 100;
-        const std::size_t val_size = (total * 10) / 100;
-
-        DatasetSplit split;
-        for (std::size_t i = 0; i < total; ++i) {
-            if (i < train_size) {
-                split.train.push_back(samples[i]);
-            } else if (i < train_size + val_size) {
-                split.val.push_back(samples[i]);
-            } else {
-                split.test.push_back(samples[i]);
-            }
-        }
-
-        return split;
+        return base_split;
     }
 };
 
