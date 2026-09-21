@@ -1,6 +1,7 @@
 #pragma once
 
 #include "tensor.hpp"
+#include "dataset.hpp"
 #include <vector>
 #include <cmath>
 #include <cstddef>
@@ -62,6 +63,44 @@ public:
             brier += diff * diff;
         }
         return brier;
+    }
+
+    // Free Energy score of logits: E(x; T) = -T * ln( sum exp(z_i / T) )
+    static Scalar energy_score(const Vector& logits, Scalar T = 1.0f) {
+        if (logits.empty()) return 0.0f;
+        const Scalar inv_t = 1.0f / std::max(0.01f, T);
+        const Scalar max_z = *std::max_element(logits.begin(), logits.end()) * inv_t;
+        
+        Scalar sum_exp = 0.0f;
+        for (Scalar z : logits) {
+            sum_exp += std::exp(z * inv_t - max_z);
+        }
+        
+        // E(x; T) = -T * (max_z + ln(sum_exp))
+        return -T * (max_z + std::log(sum_exp));
+    }
+
+    // Area Under the ROC Curve (AUROC) for binary discrimination (higher score for ID, lower for OOD or vice-versa)
+    static Scalar compute_auroc(const std::vector<Scalar>& id_scores, const std::vector<Scalar>& ood_scores, bool id_has_lower_score = true) {
+        if (id_scores.empty() || ood_scores.empty()) return 0.5f;
+
+        std::size_t wins = 0;
+        std::size_t ties = 0;
+        const std::size_t total_pairs = id_scores.size() * ood_scores.size();
+
+        for (Scalar id_val : id_scores) {
+            for (Scalar ood_val : ood_scores) {
+                if (id_has_lower_score) {
+                    if (id_val < ood_val) ++wins;
+                    else if (std::abs(id_val - ood_val) < 1e-6f) ++ties;
+                } else {
+                    if (id_val > ood_val) ++wins;
+                    else if (std::abs(id_val - ood_val) < 1e-6f) ++ties;
+                }
+            }
+        }
+
+        return (static_cast<Scalar>(wins) + 0.5f * static_cast<Scalar>(ties)) / static_cast<Scalar>(total_pairs);
     }
 
     // Evaluate full calibration report across multiple predictions
@@ -198,7 +237,6 @@ public:
                 for (std::size_t k = 0; k < z.size(); ++k) scaled_z[k] = z[k] * inv_t;
                 Vector p = softmax(scaled_z);
 
-                // dL/dT = (1/T^2) * sum_i (p_i - y_i) * z_i
                 Scalar sample_grad = 0.0f;
                 for (std::size_t k = 0; k < z.size(); ++k) {
                     const Scalar target_k = (k == y) ? 1.0f : 0.0f;
@@ -215,6 +253,64 @@ public:
                 break;
             }
         }
+    }
+};
+
+struct SelectiveDecision {
+    bool is_in_distribution{true};
+    Scalar energy{0.0f};
+    Choice predicted_choice{Choice::Unknown};
+    Scalar confidence{0.0f};
+    Scalar normalized_entropy{0.0f};
+    bool abstained{false};
+};
+
+class SelectivePredictor {
+public:
+    Scalar energy_threshold{0.0f}; // tau_OOD
+
+    // Fit energy threshold on in-distribution validation set (e.g. 95th percentile of energy)
+    void fit_threshold(const std::vector<Vector>& val_logits, Scalar percentile = 0.95f) {
+        if (val_logits.empty()) return;
+        std::vector<Scalar> energies;
+        energies.reserve(val_logits.size());
+        for (const auto& z : val_logits) {
+            energies.push_back(Calibration::energy_score(z));
+        }
+        std::sort(energies.begin(), energies.end());
+        const std::size_t idx = static_cast<std::size_t>(static_cast<Scalar>(energies.size() - 1) * percentile);
+        energy_threshold = energies[idx] + 0.5f; // Small tolerance margin
+    }
+
+    [[nodiscard]] SelectiveDecision evaluate(const Vector& logits, const Vector& probs) const {
+        const Scalar e = Calibration::energy_score(logits);
+        const bool ood = (e > energy_threshold);
+
+        auto max_it = std::max_element(probs.begin(), probs.end());
+        const std::size_t pred_idx = static_cast<std::size_t>(std::distance(probs.begin(), max_it));
+        const Scalar raw_conf = *max_it;
+        const Scalar norm_ent = Calibration::normalized_entropy(probs);
+
+        if (ood) {
+            // Abstain from high confidence: force uncertainty
+            return SelectiveDecision{
+                .is_in_distribution = false,
+                .energy = e,
+                .predicted_choice = Choice::Unknown,
+                .confidence = 0.25f,
+                .normalized_entropy = 1.0f,
+                .abstained = true
+            };
+        }
+
+        return SelectiveDecision{
+            .is_in_distribution = true,
+            .energy = e,
+            .predicted_choice = static_cast<Choice>(pred_idx),
+            .confidence = raw_conf,
+            .normalized_entropy = norm_ent,
+            .abstained = false
+        };
     }
 };
 

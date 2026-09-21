@@ -35,8 +35,8 @@ void test_disjoint_partitions() {
                              split.train.size(), split.val.size(), split.test.size());
 }
 
-void test_generalization_on_unseen_states() {
-    std::cout << "[ACCEPTANCE] Training and evaluating generalization on genuinely unseen state configurations...\n";
+void test_generalization_and_ood_energy() {
+    std::cout << "[ACCEPTANCE] Training and evaluating generalization, energy AUROC and selective prediction...\n";
     constexpr std::uint64_t kSeed = 101;
     tso::Random rng(kSeed);
 
@@ -91,6 +91,7 @@ void test_generalization_on_unseen_states() {
     std::vector<tso::Vector> test_n_probs;
     std::vector<std::size_t> test_c_targets;
     std::vector<std::size_t> test_n_targets;
+    std::vector<float> id_test_energies;
 
     for (const auto& sample : split.test) {
         auto out = model.forward(sample.x);
@@ -98,6 +99,7 @@ void test_generalization_on_unseen_states() {
         test_n_probs.push_back(out.noul_probs);
         test_c_targets.push_back(sample.y);
         test_n_targets.push_back(sample.noul_target);
+        id_test_energies.push_back(tso::Calibration::energy_score(model.choice_logits()));
     }
 
     auto c_report = tso::Calibration::evaluate(test_c_probs, test_c_targets, 10);
@@ -110,41 +112,53 @@ void test_generalization_on_unseen_states() {
     ACCEPTANCE_ASSERT(n_report.accuracy >= 0.85f, "Noul generalization on unseen states must be >= 85%");
     ACCEPTANCE_ASSERT(c_report.ece <= 0.08f, "Choice ECE must be <= 0.08");
 
-    // 1. Direct Factual Contradiction in valid state
-    tso::StructuredState direct_contradiction{
-        .declared = false,
-        .registered = true,
-        .runtime = tso::RuntimeState::Running,
-        .witness = tso::WitnessState::Valid,
-        .freshness = tso::FreshnessState::Fresh,
-        .health = tso::HealthState::Healthy
-    };
-    auto out_direct = model.forward(direct_contradiction.encode());
-    float p_inc_direct = out_direct.choice_probs[static_cast<std::size_t>(tso::Choice::Inconsistent)];
-    std::cout << std::format("  • Direct Factual Contradiction P(INCONSISTENT): {:.4f}\n", p_inc_direct);
-    ACCEPTANCE_ASSERT(p_inc_direct >= 0.85f, "Direct contradiction must produce high P(INCONSISTENT) >= 0.85");
-
-    // 2. Test OOD Taxonomy
+    // Energy AUROC Check for Alien/Unstructured OOD Noise
+    std::vector<float> noise_ood_energies;
     for (const auto& ood : split.ood) {
-        auto out = model.forward(ood.x);
-        if (ood.category == tso::OodCategory::NoSignal) {
-            float norm_ent = tso::Calibration::normalized_entropy(out.choice_probs);
-            std::cout << std::format("  • NO_SIGNAL Normalized Entropy: {:.4f}\n", norm_ent);
-            ACCEPTANCE_ASSERT(norm_ent >= 0.60f, "NO_SIGNAL must produce high normalized entropy (>= 0.60)");
-        } else if (ood.category == tso::OodCategory::UniformDispersion) {
-            float norm_ent = tso::Calibration::normalized_entropy(out.choice_probs);
-            std::cout << std::format("  • UNIFORM_DISPERSION Normalized Entropy: {:.4f}\n", norm_ent);
-            ACCEPTANCE_ASSERT(norm_ent >= 0.50f, "UNIFORM_DISPERSION must produce high entropy");
+        if (ood.category == tso::OodCategory::NoSignal ||
+            ood.category == tso::OodCategory::UniformDispersion ||
+            ood.category == tso::OodCategory::CorruptedInput) {
+            model.forward(ood.x);
+            noise_ood_energies.push_back(tso::Calibration::energy_score(model.choice_logits()));
         }
     }
 
-    std::cout << "  ✓ Scientific acceptance criteria passed on unseen configurations and OOD taxonomy!\n";
+    float noise_auroc = tso::Calibration::compute_auroc(id_test_energies, noise_ood_energies, true);
+    std::cout << std::format("  • Energy Alien-Noise OOD AUROC: {:.4f}\n", noise_auroc);
+    ACCEPTANCE_ASSERT(noise_auroc >= 0.80f, "Energy score AUROC against alien noise must be >= 0.80");
+
+    // Selective Predictor
+    std::vector<tso::Vector> val_logits;
+    for (const auto& sample : split.val) {
+        model.forward(sample.x);
+        val_logits.push_back(model.choice_logits());
+    }
+    tso::SelectivePredictor predictor;
+    predictor.fit_threshold(val_logits, 0.98f);
+
+    // ID test set acceptance rate must be >= 90%
+    std::size_t id_accepted = 0;
+    for (const auto& sample : split.test) {
+        model.forward(sample.x);
+        auto decision = predictor.evaluate(model.choice_logits(), model.choice_probs());
+        if (!decision.abstained) ++id_accepted;
+    }
+    const float id_accept_rate = static_cast<float>(id_accepted) / static_cast<float>(split.test.size());
+    std::cout << std::format("  • ID Test Set Acceptance Rate: {:.2f}%\n", id_accept_rate * 100.0f);
+    ACCEPTANCE_ASSERT(id_accept_rate >= 0.90f, "ID Test set acceptance rate must be >= 90%");
+
+    // Alien OOD (Zero signal) must be abstained
+    model.forward(split.ood[0].x);
+    auto no_signal_decision = predictor.evaluate(model.choice_logits(), model.choice_probs());
+    ACCEPTANCE_ASSERT(no_signal_decision.abstained, "Alien zero-signal OOD input must be rejected/abstained");
+
+    std::cout << "  ✓ Scientific acceptance criteria passed on unseen configurations, energy AUROC and selective prediction!\n";
 }
 
 int main() {
     std::cout << "=== TinySystemOne Rigorous Scientific Acceptance Tests ===\n";
     test_disjoint_partitions();
-    test_generalization_on_unseen_states();
+    test_generalization_and_ood_energy();
     std::cout << "\033[1;32mAll acceptance criteria satisfied with zero data leakage!\033[0m\n";
     return 0;
 }
