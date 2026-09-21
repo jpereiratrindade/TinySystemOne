@@ -55,6 +55,9 @@ target_include_directories(tso_exp006 PRIVATE include)
 add_executable(tso_exp007 src/exp007_main.cpp)
 target_include_directories(tso_exp007 PRIVATE include)
 
+add_executable(tso_exp008 src/exp008_main.cpp)
+target_include_directories(tso_exp008 PRIVATE include)
+
 # High-Level Production Classifier CLI & Tool
 add_executable(tso_classifier src/classifier_cli.cpp)
 target_include_directories(tso_classifier PRIVATE include)
@@ -75,12 +78,16 @@ target_include_directories(test_classifier PRIVATE include)
 add_executable(test_tokenizer tests/test_tokenizer.cpp)
 target_include_directories(test_tokenizer PRIVATE include)
 
+add_executable(test_attention tests/test_attention.cpp)
+target_include_directories(test_attention PRIVATE include)
+
 enable_testing()
 add_test(NAME TestMath COMMAND test_math)
 add_test(NAME TestDataset COMMAND test_dataset)
 add_test(NAME TestAcceptance COMMAND test_acceptance)
 add_test(NAME TestClassifier COMMAND test_classifier)
 add_test(NAME TestTokenizer COMMAND test_tokenizer)
+add_test(NAME TestAttention COMMAND test_attention)
 add_test(NAME Exp001 COMMAND tso_exp001)
 add_test(NAME Exp002 COMMAND tso_exp002)
 add_test(NAME Exp003 COMMAND tso_exp003)
@@ -88,4 +95,6 @@ add_test(NAME Exp004 COMMAND tso_exp004)
 add_test(NAME Exp005 COMMAND tso_exp005)
 add_test(NAME Exp006 COMMAND tso_exp006)
 add_test(NAME Exp007 COMMAND tso_exp007)
+add_test(NAME Exp008 COMMAND tso_exp008)
+
 

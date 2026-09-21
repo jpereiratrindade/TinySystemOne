@@ -4,6 +4,8 @@
 #include "random.hpp"
 #include "optimizer.hpp"
 #include "embedding.hpp"
+#include "attention.hpp"
+#include "transformer.hpp"
 #include <vector>
 #include <cstddef>
 #include <numeric>
@@ -336,4 +338,110 @@ private:
     MultiHeadMLP mlp_;
 };
 
+/**
+ * @brief End-to-End Sequence Model with Multi-Head Self-Attention (v0.8.0 / EXP-008).
+ *
+ * Sequence of Tokens -> Embeddings (W_tok + W_pos)
+ *                   -> TransformerEncoderBlock (Pre-LN + MHA + GELU FFN)
+ *                   -> Contextual [CLS] Token Representation
+ *                   -> MultiHeadMLP (Choice, Locus, Score, Uncertainty)
+ */
+class AttentionMultiHeadMLP {
+public:
+    AttentionMultiHeadMLP(
+        std::size_t vocab_size,
+        std::size_t max_seq_len,
+        std::size_t embedding_dim,
+        std::size_t num_heads,
+        std::size_t ff_dim,
+        const std::vector<LayerConfig>& trunk_configs,
+        std::size_t latent_dim,
+        std::size_t choice_dim,
+        std::size_t noul_dim,
+        Random& rng,
+        uint32_t seed = 42
+    ) : embedding_(vocab_size, max_seq_len, embedding_dim, rng),
+        encoder_(embedding_dim, num_heads, ff_dim, seed),
+        mlp_(trunk_configs, latent_dim, choice_dim, noul_dim, rng),
+        embedding_dim_(embedding_dim),
+        step_count_(0) {}
+
+    MultiHeadOutput forward(const std::vector<TokenId>& tokens) {
+        last_tokens_ = tokens;
+        Sequence seq_in = embedding_.forward_sequence(tokens);
+        last_seq_len_ = seq_in.size();
+
+        Sequence enc_out = encoder_.forward(seq_in);
+
+        // Extract contextual [CLS] vector at position 0
+        Vector cls_vec(embedding_dim_, 0.0f);
+        if (!enc_out.empty()) {
+            for (std::size_t d = 0; d < embedding_dim_; ++d) {
+                cls_vec[d] = static_cast<Scalar>(enc_out[0][d]);
+            }
+        }
+
+        return mlp_.forward(cls_vec);
+    }
+
+    void backward(
+        const Vector& dlogits_choice,
+        const Vector& dlogits_noul,
+        const Vector& dscore,
+        const Vector& duncertainty
+    ) {
+        Vector d_cls = mlp_.backward(dlogits_choice, dlogits_noul, dscore, duncertainty);
+
+        // Sequence gradient for Transformer Encoder: zero everywhere except at pos 0 ([CLS])
+        Sequence d_enc(last_seq_len_, std::vector<double>(embedding_dim_, 0.0));
+        if (last_seq_len_ > 0) {
+            for (std::size_t d = 0; d < embedding_dim_; ++d) {
+                d_enc[0][d] = static_cast<double>(d_cls[d]);
+            }
+        }
+
+        Sequence d_emb = encoder_.backward(d_enc);
+        embedding_.backward_sequence(d_emb);
+    }
+
+    void zero_grad() {
+        embedding_.zero_grad();
+        encoder_.zero_grad();
+        mlp_.zero_grad();
+    }
+
+    void update(AdamW& optimizer) {
+        step_count_++;
+        embedding_.update(optimizer);
+        encoder_.step_adamw(optimizer.lr(), step_count_, optimizer.weight_decay());
+        mlp_.update(optimizer);
+    }
+
+    [[nodiscard]] std::size_t num_params() const {
+        // encoder params: 4 * d_model^2 + 4 * d_model (MHA) + 2 * d_model * d_ff + d_ff + d_model (FFN) + 4 * d_model (LN)
+        size_t enc_params = encoder_.mha.W_q.size() * 4 + encoder_.mha.b_q.size() * 4 +
+                            encoder_.W1.size() + encoder_.b1.size() +
+                            encoder_.W2.size() + encoder_.b2.size() +
+                            encoder_.ln1.gamma.size() * 2 + encoder_.ln2.gamma.size() * 2;
+        return embedding_.num_params() + enc_params + mlp_.num_params();
+    }
+
+    [[nodiscard]] Embedding& embedding() { return embedding_; }
+    [[nodiscard]] const Embedding& embedding() const { return embedding_; }
+    [[nodiscard]] TransformerEncoderBlock& encoder() { return encoder_; }
+    [[nodiscard]] const TransformerEncoderBlock& encoder() const { return encoder_; }
+    [[nodiscard]] MultiHeadMLP& mlp() { return mlp_; }
+    [[nodiscard]] const MultiHeadMLP& mlp() const { return mlp_; }
+
+private:
+    Embedding embedding_;
+    TransformerEncoderBlock encoder_;
+    MultiHeadMLP mlp_;
+    std::size_t embedding_dim_;
+    std::vector<TokenId> last_tokens_;
+    std::size_t last_seq_len_{0};
+    size_t step_count_{0};
+};
+
 } // namespace tso
+

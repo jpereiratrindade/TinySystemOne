@@ -21,6 +21,9 @@ struct ParameterState {
 
 class AdamW {
 public:
+    AdamW(Scalar lr, Scalar beta1 = 0.9f, Scalar beta2 = 0.999f, Scalar weight_decay = 0.01f, Scalar eps = 1e-8f)
+        : config_{lr, beta1, beta2, eps, weight_decay} {}
+
     explicit AdamW(const AdamWConfig& config = {}) : config_(config) {}
 
     void step(Matrix& W, const Matrix& dW, ParameterState& state) {
@@ -71,6 +74,10 @@ public:
 
     [[nodiscard]] Scalar lr() const {
         return config_.lr;
+    }
+
+    [[nodiscard]] Scalar weight_decay() const {
+        return config_.weight_decay;
     }
 
 private:

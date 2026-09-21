@@ -70,6 +70,7 @@ ctest --test-dir build --output-on-failure
 ./build/test_acceptance
 ./build/test_classifier
 ./build/test_tokenizer
+./build/test_attention
 ```
 
 ### Executar a API de Classificação de Produção (CLI & Benchmark)
@@ -100,6 +101,9 @@ ctest --test-dir build --output-on-failure
 
 # EXP-007: Tokenização Discreta, Embeddings Treináveis e Topologia Semântica
 ./build/tso_exp007
+
+# EXP-008: Tiny Multi-Head Self-Attention, Roteamento Contextual e Heatmaps
+./build/tso_exp008
 ```
 
 ---
@@ -113,7 +117,7 @@ ctest --test-dir build --output-on-failure
 - [x] **v0.5**: OOD, Predição Seletiva / Abstenção Formal e Universo Canônico $\Omega=576$ (EXP-005)
 - [x] **v0.6**: Representações semanticamente equivalentes e variedades latentes invariantes (EXP-006)
 - [x] **v0.7**: Tokens / Embeddings Treináveis e Topologia Semântica Emergente (EXP-007)
-- [ ] **v0.8**: Tiny Attention Encoder (Self-Attention $QK^T/\sqrt{d_k}V$ Multi-Head)
+- [x] **v0.8**: Tiny Attention Encoder (Self-Attention $QK^T/\sqrt{d_k}V$ Multi-Head & Pre-LN Block) (EXP-008)
 - [ ] **v0.9**: Linguagem semi-estruturada em microdomínio controlado
 - [ ] **v1.0**: Julgamento probabilístico tipado sobre estados textuais (Local-First, Minimal Model)
 - [ ] **v2.0 (Horizonte de Pesquisa)**: *Question-Conditioned Typed Judgment* ($\text{State} + \text{Typed Question} \to \text{Typed Probabilistic Answer}$)

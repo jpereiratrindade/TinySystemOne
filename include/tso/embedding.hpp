@@ -11,6 +11,8 @@
 
 namespace tso {
 
+using Sequence = std::vector<std::vector<double>>;
+
 class Embedding {
 public:
     Embedding(std::size_t vocab_size, std::size_t max_seq_len, std::size_t embedding_dim, Random& rng)
@@ -50,6 +52,23 @@ public:
         return pooled;
     }
 
+    // Forward pass: returns full sequence of vectors (L x embedding_dim_)
+    Sequence forward_sequence(const std::vector<TokenId>& tokens) {
+        tokens_cache_ = tokens;
+        seq_len_cache_ = std::min(tokens.size(), max_seq_len_);
+
+        Sequence seq(seq_len_cache_, std::vector<double>(embedding_dim_, 0.0));
+        for (std::size_t pos = 0; pos < seq_len_cache_; ++pos) {
+            const auto tok_idx = static_cast<std::size_t>(tokens[pos]);
+            if (tok_idx < vocab_size_) {
+                for (std::size_t d = 0; d < embedding_dim_; ++d) {
+                    seq[pos][d] = static_cast<double>(W_tok_(tok_idx, d) + W_pos_(pos, d));
+                }
+            }
+        }
+        return seq;
+    }
+
     // Backward pass for mean-pooled representation
     void backward_mean_pooled(const Vector& grad_pooled) {
         if (seq_len_cache_ == 0) return;
@@ -60,6 +79,20 @@ public:
             if (tok_idx < vocab_size_) {
                 for (std::size_t d = 0; d < embedding_dim_; ++d) {
                     const Scalar g = grad_pooled[d] * scale;
+                    dW_tok_(tok_idx, d) += g;
+                    dW_pos_(pos, d) += g;
+                }
+            }
+        }
+    }
+
+    // Backward pass for full sequence gradients dX (L x embedding_dim_)
+    void backward_sequence(const Sequence& grad_seq) {
+        for (std::size_t pos = 0; pos < seq_len_cache_ && pos < grad_seq.size(); ++pos) {
+            const auto tok_idx = static_cast<std::size_t>(tokens_cache_[pos]);
+            if (tok_idx < vocab_size_) {
+                for (std::size_t d = 0; d < embedding_dim_; ++d) {
+                    const Scalar g = static_cast<Scalar>(grad_seq[pos][d]);
                     dW_tok_(tok_idx, d) += g;
                     dW_pos_(pos, d) += g;
                 }
