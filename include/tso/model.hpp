@@ -244,6 +244,7 @@ public:
     [[nodiscard]] Layer& choice_head() { return choice_head_; }
     [[nodiscard]] Layer& noul_head() { return noul_head_; }
     [[nodiscard]] Layer& score_head() { return score_head_; }
+    [[nodiscard]] Layer& uncertainty_head() { return uncertainty_head_; }
     [[nodiscard]] const Vector& choice_logits() const { return choice_logits_cache_; }
     [[nodiscard]] const Vector& noul_logits() const { return noul_logits_cache_; }
     [[nodiscard]] const Vector& choice_probs() const { return choice_probs_cache_; }

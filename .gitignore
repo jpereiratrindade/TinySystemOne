@@ -17,7 +17,9 @@ lib/
 
 # CMake temporary files
 CMakeFiles/
-CMakeCache.txt
-cmake_install.cmake
-Makefile
 compile_commands.json
+
+# Model binary artifacts
+*.bin
+*.tso
+

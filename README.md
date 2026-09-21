@@ -32,13 +32,20 @@ cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
-### Executar Testes Unitários e de Aceitação Científica
+### Executar Testes Unitários, Aceitação e Classificador
 ```bash
 ctest --test-dir build --output-on-failure
 # ou individualmente:
 ./build/test_math
 ./build/test_dataset
 ./build/test_acceptance
+./build/test_classifier
+```
+
+### Executar a API de Classificação de Produção (CLI & Benchmark)
+```bash
+# Executa inferências ricas sobre cenários nominais, degradados, contraditórios e benchmark de 100.000 amostras:
+./build/tso_classifier
 ```
 
 ### Executar Experimentos

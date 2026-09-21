@@ -76,6 +76,44 @@ enum class WitnessState : std::size_t { Valid = 0, Invalid = 1, Stale = 2, Unkno
 enum class FreshnessState : std::size_t { Fresh = 0, Aging = 1, Expired = 2 };
 enum class HealthState : std::size_t { Healthy = 0, Degraded = 1, Failing = 2, Unknown = 3 };
 
+inline std::string_view to_string(RuntimeState s) {
+    switch (s) {
+        case RuntimeState::Running: return "RUNNING";
+        case RuntimeState::Absent: return "ABSENT";
+        case RuntimeState::Unknown: return "UNKNOWN";
+    }
+    return "UNKNOWN";
+}
+
+inline std::string_view to_string(WitnessState s) {
+    switch (s) {
+        case WitnessState::Valid: return "VALID";
+        case WitnessState::Invalid: return "INVALID";
+        case WitnessState::Stale: return "STALE";
+        case WitnessState::Unknown: return "UNKNOWN";
+    }
+    return "UNKNOWN";
+}
+
+inline std::string_view to_string(FreshnessState s) {
+    switch (s) {
+        case FreshnessState::Fresh: return "FRESH";
+        case FreshnessState::Aging: return "AGING";
+        case FreshnessState::Expired: return "EXPIRED";
+    }
+    return "UNKNOWN";
+}
+
+inline std::string_view to_string(HealthState s) {
+    switch (s) {
+        case HealthState::Healthy: return "HEALTHY";
+        case HealthState::Degraded: return "DEGRADED";
+        case HealthState::Failing: return "FAILING";
+        case HealthState::Unknown: return "UNKNOWN";
+    }
+    return "UNKNOWN";
+}
+
 struct PresenceMask {
     bool declared{true};
     bool registered{true};
