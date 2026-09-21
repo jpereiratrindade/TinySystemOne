@@ -3,6 +3,7 @@
 #include "tensor.hpp"
 #include "random.hpp"
 #include "optimizer.hpp"
+#include "embedding.hpp"
 #include <vector>
 #include <cstddef>
 #include <numeric>
@@ -185,7 +186,7 @@ public:
         };
     }
 
-    void backward(
+    Vector backward(
         const Vector& dlogits_choice,
         const Vector& dlogits_noul,
         const Vector& dscore,
@@ -206,6 +207,7 @@ public:
         for (auto it = trunk_.rbegin(); it != trunk_.rend(); ++it) {
             grad = it->backward(grad);
         }
+        return grad;
     }
 
     [[nodiscard]] Vector extract_latent(const Vector& x) {
@@ -280,6 +282,58 @@ private:
     Vector noul_probs_cache_;
     Scalar score_cache_{0.0f};
     Scalar uncertainty_cache_{0.0f};
+};
+
+class TokenizedMultiHeadMLP {
+public:
+    TokenizedMultiHeadMLP(
+        std::size_t vocab_size,
+        std::size_t max_seq_len,
+        std::size_t embedding_dim,
+        const std::vector<LayerConfig>& trunk_configs,
+        std::size_t latent_dim,
+        std::size_t choice_dim,
+        std::size_t noul_dim,
+        Random& rng
+    ) : embedding_(vocab_size, max_seq_len, embedding_dim, rng),
+        mlp_(trunk_configs, latent_dim, choice_dim, noul_dim, rng) {}
+
+    MultiHeadOutput forward(const std::vector<TokenId>& tokens) {
+        Vector pooled = embedding_.forward_mean_pooled(tokens);
+        return mlp_.forward(pooled);
+    }
+
+    void backward(
+        const Vector& dlogits_choice,
+        const Vector& dlogits_noul,
+        const Vector& dscore,
+        const Vector& duncertainty
+    ) {
+        Vector grad_input = mlp_.backward(dlogits_choice, dlogits_noul, dscore, duncertainty);
+        embedding_.backward_mean_pooled(grad_input);
+    }
+
+    void zero_grad() {
+        embedding_.zero_grad();
+        mlp_.zero_grad();
+    }
+
+    void update(AdamW& optimizer) {
+        embedding_.update(optimizer);
+        mlp_.update(optimizer);
+    }
+
+    [[nodiscard]] std::size_t num_params() const {
+        return embedding_.num_params() + mlp_.num_params();
+    }
+
+    [[nodiscard]] Embedding& embedding() { return embedding_; }
+    [[nodiscard]] MultiHeadMLP& mlp() { return mlp_; }
+    [[nodiscard]] const MultiHeadMLP& mlp() const { return mlp_; }
+
+private:
+    Embedding embedding_;
+    MultiHeadMLP mlp_;
 };
 
 } // namespace tso

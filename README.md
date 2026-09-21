@@ -67,6 +67,9 @@ ctest --test-dir build --output-on-failure
 
 # EXP-006: Representações Semanticamente Equivalentes e Variedades Latentes Invariantes
 ./build/tso_exp006
+
+# EXP-007: Tokenização Discreta, Embeddings Treináveis e Topologia Semântica
+./build/tso_exp007
 ```
 
 ---
@@ -79,7 +82,8 @@ ctest --test-dir build --output-on-failure
 - [x] **v0.4**: Evidência contraditória e robustez de calibração (EXP-004)
 - [x] **v0.5**: OOD, Predição Seletiva / Abstenção Formal e Universo Canônico $\Omega=576$ (EXP-005)
 - [x] **v0.6**: Representações semanticamente equivalentes e variedades latentes invariantes (EXP-006)
-- [ ] **v0.7**: Tokens / Embeddings
-- [ ] **v0.8**: Tiny Attention Encoder
+- [x] **v0.7**: Tokens / Embeddings Treináveis e Topologia Semântica Emergente (EXP-007)
+- [ ] **v0.8**: Tiny Attention Encoder (Self-Attention $QK^T/\sqrt{d_k}V$ Multi-Head)
 - [ ] **v0.9**: Linguagem semi-estruturada
 - [ ] **v1.0**: Julgamento probabilístico tipado sobre estados textuais
+
