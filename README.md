@@ -70,6 +70,7 @@ ctest --test-dir build --output-on-failure
 ./build/test_acceptance
 ./build/test_classifier
 ./build/test_tokenizer
+./build/test_text_tokenizer
 ./build/test_attention
 ```
 
@@ -104,6 +105,9 @@ ctest --test-dir build --output-on-failure
 
 # EXP-008: Tiny Multi-Head Self-Attention, Roteamento Contextual e Heatmaps
 ./build/tso_exp008
+
+# EXP-009: Linguagem Semi-Estruturada em Microdomínio e Invariância Sintática
+./build/tso_exp009
 ```
 
 ---
@@ -118,7 +122,7 @@ ctest --test-dir build --output-on-failure
 - [x] **v0.6**: Representações semanticamente equivalentes e variedades latentes invariantes (EXP-006)
 - [x] **v0.7**: Tokens / Embeddings Treináveis e Topologia Semântica Emergente (EXP-007)
 - [x] **v0.8**: Tiny Attention Encoder (Self-Attention $QK^T/\sqrt{d_k}V$ Multi-Head & Pre-LN Block) (EXP-008)
-- [ ] **v0.9**: Linguagem semi-estruturada em microdomínio controlado
+- [x] **v0.9**: Linguagem semi-estruturada em microdomínio controlado (EXP-009)
 - [ ] **v1.0**: Julgamento probabilístico tipado sobre estados textuais (Local-First, Minimal Model)
 - [ ] **v2.0 (Horizonte de Pesquisa)**: *Question-Conditioned Typed Judgment* ($\text{State} + \text{Typed Question} \to \text{Typed Probabilistic Answer}$)
 

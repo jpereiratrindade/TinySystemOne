@@ -599,4 +599,47 @@ public:
     }
 };
 
+enum class TextualStyle : std::size_t {
+    NaturalProse = 0,
+    TelemetryLog = 1,
+    DiagnosticReport = 2,
+    CompactKeyValue = 3
+};
+
+class TextualStateGenerator {
+public:
+    static std::string generate_text(const StructuredState& s, TextualStyle style) {
+        std::string decl_str = s.declared ? "true" : "false";
+        std::string reg_str  = s.registered ? "true" : "false";
+        std::string run_str  = s.runtime == RuntimeState::Running ? "running" : (s.runtime == RuntimeState::Absent ? "absent" : "unknown");
+        std::string wit_str  = s.witness == WitnessState::Valid ? "valid" : (s.witness == WitnessState::Invalid ? "invalid" : (s.witness == WitnessState::Stale ? "stale" : "unknown"));
+        std::string fresh_str = s.freshness == FreshnessState::Fresh ? "fresh" : (s.freshness == FreshnessState::Aging ? "aging" : "expired");
+        std::string hlth_str = s.health == HealthState::Healthy ? "healthy" : (s.health == HealthState::Degraded ? "degraded" : (s.health == HealthState::Failing ? "failing" : "unknown"));
+
+        switch (style) {
+            case TextualStyle::NaturalProse:
+                return std::format(
+                    "declaration is {} and registration is {}. runtime process is {} and witness is {}. freshness is {} and health is {}.",
+                    decl_str, reg_str, run_str, wit_str, fresh_str, hlth_str
+                );
+            case TextualStyle::TelemetryLog:
+                return std::format(
+                    "[status] decl={} | reg={} | run={} | wit={} | fresh={} | hlth={}",
+                    decl_str, reg_str, run_str, wit_str, fresh_str, hlth_str
+                );
+            case TextualStyle::DiagnosticReport:
+                return std::format(
+                    "service declaration: {}; discovery: {}; execution: {}; verification: {}; telemetry: {}; metric: {}",
+                    decl_str, reg_str, run_str, wit_str, fresh_str, hlth_str
+                );
+            case TextualStyle::CompactKeyValue:
+                return std::format(
+                    "decl:{} reg:{} run:{} wit:{} fresh:{} hlth:{}",
+                    decl_str, reg_str, run_str, wit_str, fresh_str, hlth_str
+                );
+        }
+        return "";
+    }
+};
+
 } // namespace tso
