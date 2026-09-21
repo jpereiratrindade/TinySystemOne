@@ -170,6 +170,8 @@ public:
         Vector s_out = score_head_.forward(h);
         Vector u_out = uncertainty_head_.forward(h);
 
+        choice_logits_cache_ = c_logits;
+        noul_logits_cache_ = n_logits;
         choice_probs_cache_ = softmax(c_logits);
         noul_probs_cache_ = softmax(n_logits);
         score_cache_ = s_out[0];
@@ -242,7 +244,12 @@ public:
     [[nodiscard]] Layer& choice_head() { return choice_head_; }
     [[nodiscard]] Layer& noul_head() { return noul_head_; }
     [[nodiscard]] Layer& score_head() { return score_head_; }
-    [[nodiscard]] Layer& uncertainty_head() { return uncertainty_head_; }
+    [[nodiscard]] const Vector& choice_logits() const { return choice_logits_cache_; }
+    [[nodiscard]] const Vector& noul_logits() const { return noul_logits_cache_; }
+    [[nodiscard]] const Vector& choice_probs() const { return choice_probs_cache_; }
+    [[nodiscard]] const Vector& noul_probs() const { return noul_probs_cache_; }
+    [[nodiscard]] Scalar score() const { return score_cache_; }
+    [[nodiscard]] Scalar uncertainty() const { return uncertainty_cache_; }
 
 private:
     std::vector<Layer> trunk_;
@@ -251,6 +258,8 @@ private:
     Layer score_head_;
     Layer uncertainty_head_;
 
+    Vector choice_logits_cache_;
+    Vector noul_logits_cache_;
     Vector choice_probs_cache_;
     Vector noul_probs_cache_;
     Scalar score_cache_{0.0f};

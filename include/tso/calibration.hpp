@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <algorithm>
 #include <numeric>
+#include <iostream>
 
 namespace tso {
 
@@ -93,7 +94,6 @@ public:
             const auto& probs = all_probs[i];
             const std::size_t target = all_targets[i];
 
-            // Top-1 prediction & confidence
             auto max_it = std::max_element(probs.begin(), probs.end());
             const std::size_t pred_idx = static_cast<std::size_t>(std::distance(probs.begin(), max_it));
             const Scalar conf = *max_it;
@@ -113,7 +113,6 @@ public:
         report.avg_entropy = total_entropy / static_cast<Scalar>(N);
         report.avg_confidence = total_conf / static_cast<Scalar>(N);
 
-        // Compute Bins
         report.bins.resize(num_bins);
         const Scalar bin_size = 1.0f / static_cast<Scalar>(num_bins);
 
@@ -158,6 +157,64 @@ public:
         report.ece = ece;
         report.mce = mce;
         return report;
+    }
+};
+
+class TemperatureScaler {
+public:
+    Scalar temperature{1.0f};
+
+    [[nodiscard]] Vector calibrate(const Vector& logits) const {
+        if (logits.empty()) return {};
+        Vector scaled(logits.size());
+        const Scalar inv_t = 1.0f / std::max(0.01f, temperature);
+        for (std::size_t i = 0; i < logits.size(); ++i) {
+            scaled[i] = logits[i] * inv_t;
+        }
+        return softmax(scaled);
+    }
+
+    void fit(
+        const std::vector<Vector>& all_logits,
+        const std::vector<std::size_t>& all_targets,
+        std::size_t max_iters = 100,
+        Scalar lr = 0.05f
+    ) {
+        if (all_logits.empty() || all_logits.size() != all_targets.size()) return;
+
+        temperature = 1.0f;
+        const Scalar N = static_cast<Scalar>(all_logits.size());
+
+        for (std::size_t iter = 0; iter < max_iters; ++iter) {
+            Scalar grad_T = 0.0f;
+            const Scalar inv_t = 1.0f / temperature;
+            const Scalar inv_t2 = inv_t * inv_t;
+
+            for (std::size_t sample_i = 0; sample_i < all_logits.size(); ++sample_i) {
+                const auto& z = all_logits[sample_i];
+                const std::size_t y = all_targets[sample_i];
+
+                Vector scaled_z(z.size());
+                for (std::size_t k = 0; k < z.size(); ++k) scaled_z[k] = z[k] * inv_t;
+                Vector p = softmax(scaled_z);
+
+                // dL/dT = (1/T^2) * sum_i (p_i - y_i) * z_i
+                Scalar sample_grad = 0.0f;
+                for (std::size_t k = 0; k < z.size(); ++k) {
+                    const Scalar target_k = (k == y) ? 1.0f : 0.0f;
+                    sample_grad += (p[k] - target_k) * z[k];
+                }
+                grad_T += inv_t2 * sample_grad;
+            }
+
+            const Scalar avg_grad = grad_T / N;
+            temperature -= lr * avg_grad;
+            temperature = std::clamp(temperature, 0.05f, 10.0f);
+
+            if (std::abs(avg_grad) < 1e-5f) {
+                break;
+            }
+        }
     }
 };
 

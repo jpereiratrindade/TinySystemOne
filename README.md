@@ -10,12 +10,12 @@ O **TinySystemOne** é uma implementação white-box de uma arquitetura neural d
 
 - 🚀 **100% C++26 puro**: Zero frameworks pesados (sem PyTorch, LibTorch, ONNX), zero dependência de rede, zero dependência de serviços externos.
 - 📐 **White-Box Neural Engine**: Álgebra linear, ativadores (GELU, ReLU, Sigmoid, Softplus, Softmax), retropropagação analítica exata e otimizadores (AdamW, SGD) implementados explicitamente.
-- 🎯 **Incerteza e Calibração de 1ª Classe**: Shannon Entropy, Brier Score, Expected Calibration Error (ECE) e Incerteza Heteroscedástica ($\sigma^2$) via Gaussian Negative Log-Likelihood (NLL).
-- 🧠 **Arquitetura 4-Head com Incerteza (v0.3.0)**:
+- 🎯 **Incerteza e Calibração de 1ª Classe**: Shannon Entropy, Brier Score, Expected Calibration Error (ECE) e **Temperature Scaling Post-Hoc** com otimizador analítico em C++26 puro.
+- 🧠 **Resolução de Conflitos e Incerteza (v0.4.0)**:
   - **Choice**: qualidade do estado (`NOMINAL`, `DEGRADED`, `INCONSISTENT`, `UNKNOWN`).
-  - **Noul**: atribuição causal / locus de anomalia.
+  - **Noul**: atribuição causal do conflito / anomalia.
   - **Score**: grau contínuo de viabilidade ($\hat{\mu}$).
-  - **Uncertainty**: variância epistêmica/falta de evidência ($\hat{\sigma}^2$).
+  - **Uncertainty**: variância epistêmica ($\hat{\sigma}^2$).
 
 ---
 
@@ -49,6 +49,9 @@ ctest --test-dir build --output-on-failure
 
 # EXP-003: Missing Values Explícitos e Curva de Degradação sob Incerteza
 ./build/tso_exp003
+
+# EXP-004: Evidência Contraditória, Resolução de Conflitos e Temperature Scaling
+./build/tso_exp004
 ```
 
 ---
@@ -58,7 +61,7 @@ ctest --test-dir build --output-on-failure
 - [x] **v0.1**: Estado estruturado $\rightarrow$ Choice calibrado + Métricas ECE/Brier/Entropia (EXP-001)
 - [x] **v0.2**: Choice + Noul (atribuição causal) + Score contínuo calibrado (EXP-002)
 - [x] **v0.3**: Missing values explícitos e aprendizado de incerteza (EXP-003)
-- [ ] **v0.4**: Evidência contraditória e robustez de calibração
+- [x] **v0.4**: Evidência contraditória e robustez de calibração (EXP-004)
 - [ ] **v0.5**: OOD e generalização
 - [ ] **v0.6**: Representações semanticamente equivalentes
 - [ ] **v0.7**: Tokens / Embeddings
