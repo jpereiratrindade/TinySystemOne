@@ -432,6 +432,12 @@ public:
     [[nodiscard]] const TransformerEncoderBlock& encoder() const { return encoder_; }
     [[nodiscard]] MultiHeadMLP& mlp() { return mlp_; }
     [[nodiscard]] const MultiHeadMLP& mlp() const { return mlp_; }
+    [[nodiscard]] const Vector& choice_logits() const { return mlp_.choice_logits(); }
+    [[nodiscard]] const Vector& noul_logits() const { return mlp_.noul_logits(); }
+    [[nodiscard]] const Vector& choice_probs() const { return mlp_.choice_probs(); }
+    [[nodiscard]] const Vector& noul_probs() const { return mlp_.noul_probs(); }
+    [[nodiscard]] Scalar score() const { return mlp_.score(); }
+    [[nodiscard]] Scalar uncertainty() const { return mlp_.uncertainty(); }
 
 private:
     Embedding embedding_;

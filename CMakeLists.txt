@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 project(TinySystemOne
-    VERSION 0.5.0
+    VERSION 1.0.0
     DESCRIPTION "A white-box C++26 engine to study calibrated probabilistic judgments and uncertainty"
     LANGUAGES CXX
 )
@@ -61,6 +61,9 @@ target_include_directories(tso_exp008 PRIVATE include)
 add_executable(tso_exp009 src/exp009_main.cpp)
 target_include_directories(tso_exp009 PRIVATE include)
 
+add_executable(tso_exp010 src/exp010_main.cpp)
+target_include_directories(tso_exp010 PRIVATE include)
+
 # High-Level Production Classifier CLI & Tool
 add_executable(tso_classifier src/classifier_cli.cpp)
 target_include_directories(tso_classifier PRIVATE include)
@@ -78,6 +81,9 @@ target_include_directories(test_acceptance PRIVATE include)
 add_executable(test_classifier tests/test_classifier.cpp)
 target_include_directories(test_classifier PRIVATE include)
 
+add_executable(test_text_classifier tests/test_text_classifier.cpp)
+target_include_directories(test_text_classifier PRIVATE include)
+
 add_executable(test_tokenizer tests/test_tokenizer.cpp)
 target_include_directories(test_tokenizer PRIVATE include)
 
@@ -92,6 +98,7 @@ add_test(NAME TestMath COMMAND test_math)
 add_test(NAME TestDataset COMMAND test_dataset)
 add_test(NAME TestAcceptance COMMAND test_acceptance)
 add_test(NAME TestClassifier COMMAND test_classifier)
+add_test(NAME TestTextClassifier COMMAND test_text_classifier)
 add_test(NAME TestTokenizer COMMAND test_tokenizer)
 add_test(NAME TestTextTokenizer COMMAND test_text_tokenizer)
 add_test(NAME TestAttention COMMAND test_attention)
@@ -104,6 +111,7 @@ add_test(NAME Exp006 COMMAND tso_exp006)
 add_test(NAME Exp007 COMMAND tso_exp007)
 add_test(NAME Exp008 COMMAND tso_exp008)
 add_test(NAME Exp009 COMMAND tso_exp009)
+add_test(NAME Exp010 COMMAND tso_exp010)
 
 
 

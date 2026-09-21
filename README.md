@@ -108,6 +108,15 @@ ctest --test-dir build --output-on-failure
 
 # EXP-009: Linguagem Semi-Estruturada em Microdomínio e Invariância Sintática
 ./build/tso_exp009
+
+# EXP-010: Julgamento Probabilístico Tipado sobre Estados Textuais em Produção (v1.0.0)
+./build/tso_exp010
+```
+
+### Inferência Direta via CLI sobre Sentenças em Linguagem Natural
+```bash
+# Inferência textual em tempo real via CLI
+./build/tso_classifier --text "declaration is true and registration is true. runtime process is running and witness is valid. freshness is fresh and health is healthy."
 ```
 
 ---
@@ -123,7 +132,7 @@ ctest --test-dir build --output-on-failure
 - [x] **v0.7**: Tokens / Embeddings Treináveis e Topologia Semântica Emergente (EXP-007)
 - [x] **v0.8**: Tiny Attention Encoder (Self-Attention $QK^T/\sqrt{d_k}V$ Multi-Head & Pre-LN Block) (EXP-008)
 - [x] **v0.9**: Linguagem semi-estruturada em microdomínio controlado (EXP-009)
-- [ ] **v1.0**: Julgamento probabilístico tipado sobre estados textuais (Local-First, Minimal Model)
+- [x] **v1.0**: Julgamento probabilístico tipado sobre estados textuais (Local-First, Minimal Model) (EXP-010)
 - [ ] **v2.0 (Horizonte de Pesquisa)**: *Question-Conditioned Typed Judgment* ($\text{State} + \text{Typed Question} \to \text{Typed Probabilistic Answer}$)
 
 

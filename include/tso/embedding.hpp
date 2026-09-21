@@ -144,6 +144,8 @@ public:
     [[nodiscard]] std::size_t max_seq_len() const { return max_seq_len_; }
     [[nodiscard]] const Matrix& token_weights() const { return W_tok_; }
     [[nodiscard]] const Matrix& pos_weights() const { return W_pos_; }
+    [[nodiscard]] Matrix& token_weights() { return W_tok_; }
+    [[nodiscard]] Matrix& pos_weights() { return W_pos_; }
 
 private:
     std::size_t vocab_size_;
