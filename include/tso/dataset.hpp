@@ -642,4 +642,93 @@ public:
     }
 };
 
+struct GroundTruthQuestion {
+    std::string text;
+    Choice expected_choice{Choice::Unknown};
+    Noul expected_locus{Noul::None};
+    Scalar expected_score{0.0f};
+    Scalar expected_noul_prob{0.0f}; // P(prop = true)
+    bool is_proposition{false};
+};
+
+class QuestionGenerator {
+public:
+    static std::vector<GroundTruthQuestion> generate_questions(const StructuredState& s) {
+        std::vector<GroundTruthQuestion> list;
+        auto j = s.evaluate_judgment();
+
+        // 1. Overall Choice Question
+        list.push_back({
+            .text = "question: what is the overall system state?",
+            .expected_choice = j.choice,
+            .expected_locus = j.noul,
+            .expected_score = j.score,
+            .expected_noul_prob = (j.choice == Choice::Nominal ? 1.0f : 0.0f),
+            .is_proposition = false
+        });
+
+        // 2. Locus Attribution Question
+        list.push_back({
+            .text = "question: which component caused the failure?",
+            .expected_choice = j.choice,
+            .expected_locus = j.noul,
+            .expected_score = j.score,
+            .expected_noul_prob = 0.0f,
+            .is_proposition = false
+        });
+
+        // 3. Score Rating Question
+        list.push_back({
+            .text = "question: rate system vitality and health",
+            .expected_choice = j.choice,
+            .expected_locus = j.noul,
+            .expected_score = j.score,
+            .expected_noul_prob = j.score,
+            .is_proposition = false
+        });
+
+        // 4. Propositional Noul Question: "is witness valid?"
+        list.push_back({
+            .text = "question: is witness valid?",
+            .expected_choice = (s.witness == WitnessState::Valid ? Choice::Nominal : Choice::Degraded),
+            .expected_locus = (s.witness == WitnessState::Valid ? Noul::None : Noul::Witness),
+            .expected_score = (s.witness == WitnessState::Valid ? 1.0f : 0.0f),
+            .expected_noul_prob = (s.witness == WitnessState::Valid ? 1.0f : 0.0f),
+            .is_proposition = true
+        });
+
+        // 5. Propositional Noul Question: "is process running?"
+        list.push_back({
+            .text = "question: is process running?",
+            .expected_choice = (s.runtime == RuntimeState::Running ? Choice::Nominal : Choice::Degraded),
+            .expected_locus = (s.runtime == RuntimeState::Running ? Noul::None : Noul::Runtime),
+            .expected_score = (s.runtime == RuntimeState::Running ? 1.0f : 0.0f),
+            .expected_noul_prob = (s.runtime == RuntimeState::Running ? 1.0f : 0.0f),
+            .is_proposition = true
+        });
+
+        // 6. Propositional Noul Question: "is telemetry fresh?"
+        list.push_back({
+            .text = "question: is telemetry fresh?",
+            .expected_choice = (s.freshness == FreshnessState::Fresh ? Choice::Nominal : Choice::Degraded),
+            .expected_locus = (s.freshness == FreshnessState::Fresh ? Noul::None : Noul::Freshness),
+            .expected_score = (s.freshness == FreshnessState::Fresh ? 1.0f : 0.0f),
+            .expected_noul_prob = (s.freshness == FreshnessState::Fresh ? 1.0f : 0.0f),
+            .is_proposition = true
+        });
+
+        // 7. Propositional Noul Question: "is declaration confirmed?"
+        list.push_back({
+            .text = "question: is declaration confirmed?",
+            .expected_choice = (s.declared ? Choice::Nominal : Choice::Inconsistent),
+            .expected_locus = (s.declared ? Noul::None : Noul::Declaration),
+            .expected_score = (s.declared ? 1.0f : 0.0f),
+            .expected_noul_prob = (s.declared ? 1.0f : 0.0f),
+            .is_proposition = true
+        });
+
+        return list;
+    }
+};
+
 } // namespace tso

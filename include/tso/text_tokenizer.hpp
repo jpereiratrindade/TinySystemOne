@@ -20,7 +20,7 @@ namespace tso {
  */
 class TextTokenizer {
 public:
-    static constexpr std::size_t kMaxSequenceLength = 32;
+    static constexpr std::size_t kMaxSequenceLength = 48;
 
     TextTokenizer() {
         init_vocabulary();
@@ -74,6 +74,46 @@ public:
         return tokens;
     }
 
+    // Dual-segment tokenization: [CLS] <state> [SEP] <question> [SEP] [PAD]...
+    std::vector<TokenId> tokenize_qa(
+        std::string_view state_text,
+        std::string_view question_text,
+        std::size_t max_len = kMaxSequenceLength
+    ) const {
+        std::vector<TokenId> tokens;
+        tokens.reserve(max_len);
+
+        // 1. [CLS]
+        tokens.push_back(static_cast<TokenId>(cls_id_));
+
+        // 2. State segment
+        std::vector<std::string> state_words = split_words_and_punctuation(state_text);
+        for (const auto& w : state_words) {
+            if (tokens.size() >= max_len - 4) break;
+            tokens.push_back(static_cast<TokenId>(string_to_token(w)));
+        }
+
+        // 3. Segment separator [SEP]
+        tokens.push_back(static_cast<TokenId>(sep_id_));
+
+        // 4. Question segment
+        std::vector<std::string> question_words = split_words_and_punctuation(question_text);
+        for (const auto& w : question_words) {
+            if (tokens.size() >= max_len - 1) break;
+            tokens.push_back(static_cast<TokenId>(string_to_token(w)));
+        }
+
+        // 5. Closing [SEP]
+        tokens.push_back(static_cast<TokenId>(sep_id_));
+
+        // 6. Padding
+        while (tokens.size() < max_len) {
+            tokens.push_back(static_cast<TokenId>(pad_id_));
+        }
+
+        return tokens;
+    }
+
     std::string decode(const std::vector<TokenId>& tokens, bool skip_special = false) const {
         std::ostringstream oss;
         bool first = true;
@@ -117,7 +157,8 @@ private:
     static bool is_punct(char c) {
         return c == ':' || c == '=' || c == ';' || c == '|' || c == ',' ||
                c == '.' || c == '[' || c == ']' || c == '(' || c == ')' ||
-               c == '{' || c == '}' || c == '-' || c == '_';
+               c == '{' || c == '}' || c == '-' || c == '_' || c == '?' ||
+               c == '/' || c == '!';
     }
 
     static std::vector<std::string> split_words_and_punctuation(std::string_view text) {
@@ -168,7 +209,7 @@ private:
 
         // 2. Syntax & Structural Punctuation
         const char* puncts[] = {
-            ":", "=", ";", "|", ",", ".", "[", "]", "(", ")", "{", "}", "-"
+            ":", "=", ";", "|", ",", ".", "[", "]", "(", ")", "{", "}", "-", "?", "/", "!"
         };
         for (const auto* p : puncts) add_token(p);
 
@@ -178,7 +219,9 @@ private:
             "witness", "freshness", "health", "signal", "telemetry",
             "status", "score", "audit", "state", "discovery", "execution",
             "verification", "metric", "condition", "locus", "evidence",
-            "decl", "reg", "run", "wit", "fresh", "hlth", "sec"
+            "decl", "reg", "run", "wit", "fresh", "hlth", "sec",
+            "question", "component", "failure", "system", "vitality", "viability",
+            "target", "eval", "noul", "choice"
         };
         for (const auto* n : domain_nouns) add_token(n);
 
@@ -187,14 +230,16 @@ private:
             "true", "false", "active", "inactive", "running", "absent",
             "valid", "invalid", "stale", "aging", "expired",
             "healthy", "degraded", "failing", "nominal", "inconsistent",
-            "unknown", "missing", "confirmed", "faulted", "present", "none"
+            "unknown", "missing", "confirmed", "faulted", "present", "none",
+            "ready", "compromised", "operational", "safe", "online", "offline"
         };
         for (const auto* v : domain_values) add_token(v);
 
-        // 5. Connectives, Prepositions & Fillers
+        // 5. Connectives, Interrogatives & Prepositions
         const char* connectives[] = {
-            "is", "and", "but", "with", "has", "at", "by", "for", "of",
-            "in", "not", "reported", "observed", "detected", "level"
+            "is", "are", "does", "can", "what", "which", "who", "where", "how",
+            "caused", "rate", "overall", "and", "but", "with", "has", "at",
+            "by", "for", "of", "in", "not", "reported", "observed", "detected", "level"
         };
         for (const auto* c : connectives) add_token(c);
     }

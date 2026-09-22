@@ -111,12 +111,21 @@ ctest --test-dir build --output-on-failure
 
 # EXP-010: Julgamento Probabilístico Tipado sobre Estados Textuais em Produção (v1.0.0)
 ./build/tso_exp010
+
+# EXP-011: Julgamento Tipado Condicionado por Perguntas (v2.0.0)
+./build/tso_exp011
 ```
 
-### Inferência Direta via CLI sobre Sentenças em Linguagem Natural
+### Inferência Direta via CLI sobre Sentenças em Linguagem Natural & Perguntas Tipadas
 ```bash
-# Inferência textual em tempo real via CLI
+# 1. Inferência de estado textual geral
 ./build/tso_classifier --text "declaration is true and registration is true. runtime process is running and witness is valid. freshness is fresh and health is healthy."
+
+# 2. Julgamento Condicionado por Pergunta Tipada (Proposições Booleanas / Noul)
+./build/tso_classifier --text "declaration is true and registration is true. runtime process is running and witness is invalid." --question "question: is witness valid?"
+
+# 3. Consulta de Atribuição Diagnóstica
+./build/tso_classifier --text "declaration is true and registration is true. runtime process is running and witness is invalid." --question "question: which component caused the failure?"
 ```
 
 ---
@@ -133,6 +142,6 @@ ctest --test-dir build --output-on-failure
 - [x] **v0.8**: Tiny Attention Encoder (Self-Attention $QK^T/\sqrt{d_k}V$ Multi-Head & Pre-LN Block) (EXP-008)
 - [x] **v0.9**: Linguagem semi-estruturada em microdomínio controlado (EXP-009)
 - [x] **v1.0**: Julgamento probabilístico tipado sobre estados textuais (Local-First, Minimal Model) (EXP-010)
-- [ ] **v2.0 (Horizonte de Pesquisa)**: *Question-Conditioned Typed Judgment* ($\text{State} + \text{Typed Question} \to \text{Typed Probabilistic Answer}$)
+- [x] **v2.0**: *Question-Conditioned Typed Judgment* ($\text{State} \oplus \text{Typed Question} \to \text{Typed Probabilistic Answer}$) (EXP-011)
 
 

@@ -7,13 +7,14 @@
 #include <algorithm>
 #include <string>
 #include <string_view>
+#include <filesystem>
 
 namespace {
 
 void print_header() {
     std::cout << "======================================================================\n";
     std::cout << "                 TinySystemOne — Classifier CLI                       \n";
-    std::cout << "        High-Level Inference, Diagnostics & Benchmark Tool (v1.0.0)   \n";
+    std::cout << "        High-Level Inference, Diagnostics & Benchmark Tool (v2.0.0)   \n";
     std::cout << "======================================================================\n\n";
 }
 
@@ -52,6 +53,7 @@ void print_text_result(std::string_view label, std::string_view text, const tso:
     std::cout << std::format("  • Julgamento (Choice):   \033[1;32m{:<12}\033[0m (Confiança: {:.1f}%, Entropia: {:.4f})\n",
                              tso::to_string(res.choice), res.confidence * 100.0f, res.entropy);
     std::cout << std::format("  • Locus Diagnóstico:     \033[1;33m{:<12}\033[0m\n", tso::to_string(res.locus));
+    std::cout << std::format("  • Proposição Noul P(true): \033[1;33m{:.4f}\033[0m\n", res.noul_truth_probability);
     std::cout << std::format("  • Viabilidade Contínua:  {:.4f}\n", res.score);
     std::cout << std::format("  • Incerteza Epistêmica:  {:.4f}\n", res.uncertainty);
     std::cout << std::format("  • Energia Livre E(x):    {:.4f} (Limiar OOD: {:.4f})\n", res.free_energy, res.model.ood_energy_threshold);
@@ -173,21 +175,42 @@ void run_text_benchmark(const tso::SystemOneTextClassifier& text_classifier, std
 int main(int argc, char* argv[]) {
     print_header();
 
-    // Check for CLI text flag: --text "<string>"
+    // Check for CLI text & question flags: --text "<string>" [--question "<string>"]
+    std::string text_input;
+    std::string question_input;
+
     for (int i = 1; i < argc; ++i) {
         std::string_view arg = argv[i];
         if (arg == "--text" && i + 1 < argc) {
-            std::string text_input = argv[i + 1];
-            auto split = tso::DatasetGenerator::generate_canonical_split(101);
-            auto text_classifier = tso::SystemOneTextClassifier::train_and_calibrate(split);
-            auto res = text_classifier.classify(text_input);
-            print_text_result("Inferência CLI Direta", text_input, res);
-            return 0;
+            text_input = argv[++i];
+        } else if (arg == "--question" && i + 1 < argc) {
+            question_input = argv[++i];
         }
     }
 
     const std::string model_file = "tso_model.bin";
     const std::string text_model_file = "tso_text_model.bin";
+
+    if (!text_input.empty()) {
+        tso::SystemOneTextClassifier text_classifier = [&]() {
+            if (std::filesystem::exists(text_model_file)) {
+                return tso::SystemOneTextClassifier::load(text_model_file);
+            }
+            auto split = tso::DatasetGenerator::generate_canonical_split(101);
+            auto tc = tso::SystemOneTextClassifier::train_and_calibrate(split);
+            tc.save(text_model_file);
+            return tc;
+        }();
+
+        if (!question_input.empty()) {
+            auto res = text_classifier.ask(text_input, question_input);
+            print_text_result(std::format("Consulta Tipada (v2.0): \"{}\"", question_input), text_input, res);
+        } else {
+            auto res = text_classifier.classify(text_input);
+            print_text_result("Inferência CLI Direta", text_input, res);
+        }
+        return 0;
+    }
 
     std::cout << "[1] Treinando e calibrando Classificador Vetorial no Universo Canônico (Ω=576)...\n";
     auto split = tso::DatasetGenerator::generate_canonical_split(101);

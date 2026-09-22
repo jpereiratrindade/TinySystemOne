@@ -56,8 +56,9 @@ struct ClassificationResult {
     Noul locus{Noul::None};
 
     // 2. Continuous Scores & Epistemic Uncertainty
-    Scalar score{0.0f};             // Viabilidade contínua estimada \hat{\mu}
-    Scalar uncertainty{0.0f};       // Variância heteroscedástica estimada \hat{\sigma}^2
+    Scalar score{0.0f};                 // Viabilidade contínua estimada \hat{\mu}
+    Scalar uncertainty{0.0f};           // Variância heteroscedástica estimada \hat{\sigma}^2
+    Scalar noul_truth_probability{0.0f};// Probabilidade de verdade da proposição P(prop=true) (v2.0)
 
     // 3. Complete Calibrated Probability Distributions
     std::array<Scalar, 4> choice_probabilities{0.25f, 0.25f, 0.25f, 0.25f};
@@ -87,7 +88,7 @@ struct ClassifierTrainingConfig {
 };
 
 struct TextClassifierTrainingConfig {
-    std::size_t epochs{90};
+    std::size_t epochs{80};
     std::size_t batch_size{16};
     Scalar learning_rate{0.006f};
     Scalar weight_decay{0.0005f};
@@ -170,7 +171,7 @@ public:
 
         ModelIdentity identity{
             .model_name = "TinySystemOne-ProductionClassifier",
-            .version = "1.0.0",
+            .version = "2.0.0",
             .trained_timestamp = static_cast<std::uint64_t>(std::chrono::system_clock::now().time_since_epoch().count()),
             .parameter_count = model.num_params(),
             .calibrated_temperature = scaler.temperature,
@@ -220,6 +221,7 @@ public:
             res.locus = Noul::None;
             res.score = 0.0f;
             res.uncertainty = 1.0f;
+            res.noul_truth_probability = 0.0f;
             res.choice_probabilities = {0.25f, 0.25f, 0.25f, 0.25f};
             res.locus_probabilities.fill(1.0f / 7.0f);
             res.confidence = 0.25f;
@@ -249,6 +251,7 @@ public:
 
         res.score = out.score;
         res.uncertainty = out.uncertainty;
+        res.noul_truth_probability = out.score;
 
         // Build human-friendly decision status
         if (res.choice == Choice::Nominal && res.confidence >= 0.90f) {
@@ -300,10 +303,10 @@ private:
 };
 
 /**
- * @brief Production Text-Transformer Classifier for Typed Probabilistic Judgment over Textual States (v1.0.0 / EXP-010).
+ * @brief Production Text-Transformer Classifier for Typed Probabilistic Judgment and Question-Conditioned Reasoning (v2.0.0 / EXP-011).
  *
- * Direct end-to-end inference from semi-structured or natural text descriptions
- * into typed choices, diagnostic loci, continuous scores, calibrated probabilities, and OOD detection.
+ * Direct end-to-end inference from state descriptions and dynamic typed questions
+ * into typed choices, diagnostic loci, continuous scores, proposition Noul truth probabilities, and OOD detection.
  */
 class SystemOneTextClassifier {
 public:
@@ -367,19 +370,23 @@ public:
             Scalar uncertainty_target;
         };
 
-        std::vector<TextTrainItem> train_items;
-        train_items.reserve(split.train.size() * 4);
+        struct StateVariations {
+            std::vector<TextTrainItem> unconditioned;
+            std::vector<TextTrainItem> conditioned;
+        };
 
-        // Augment training data across 4 syntax styles
+        std::vector<StateVariations> train_cache;
+        train_cache.reserve(split.train.size());
+
         for (const auto& sample : split.train) {
             auto it = state_lookup.find(sample.state_id);
             if (it == state_lookup.end()) continue;
             const auto& st = it->second;
 
-            for (std::size_t s = 0; s < 4; ++s) {
-                auto style = static_cast<TextualStyle>(s);
-                std::string text = TextualStateGenerator::generate_text(st, style);
-                train_items.push_back({
+            StateVariations var;
+            for (int s = 0; s < 4; ++s) {
+                std::string text = TextualStateGenerator::generate_text(st, static_cast<TextualStyle>(s));
+                var.unconditioned.push_back({
                     .tokens = tokenizer.tokenize(text),
                     .y = sample.y,
                     .noul_target = sample.noul_target,
@@ -387,23 +394,51 @@ public:
                     .uncertainty_target = sample.uncertainty_target
                 });
             }
+
+            auto questions = QuestionGenerator::generate_questions(st);
+            std::string base_text = TextualStateGenerator::generate_text(st, TextualStyle::NaturalProse);
+            for (const auto& q : questions) {
+                var.conditioned.push_back({
+                    .tokens = tokenizer.tokenize_qa(base_text, q.text),
+                    .y = static_cast<std::size_t>(q.expected_choice),
+                    .noul_target = static_cast<std::size_t>(q.expected_locus),
+                    .score_target = q.is_proposition ? q.expected_noul_prob : q.expected_score,
+                    .uncertainty_target = 0.01f
+                });
+            }
+
+            train_cache.push_back(std::move(var));
         }
 
-        // Training loop
+        // Fast zero-allocation training loop over pre-tokenized representations
         for (std::size_t epoch = 1; epoch <= cfg.epochs; ++epoch) {
-            rng.shuffle(train_items);
+            std::vector<const TextTrainItem*> epoch_items;
+            epoch_items.reserve(train_cache.size() * 2);
 
-            for (std::size_t i = 0; i < train_items.size(); i += cfg.batch_size) {
-                const std::size_t cur_batch = std::min(cfg.batch_size, train_items.size() - i);
+            for (const auto& var : train_cache) {
+                if (!var.unconditioned.empty()) {
+                    std::size_t u_idx = static_cast<std::size_t>(rng.uniform_int(0, static_cast<int>(var.unconditioned.size() - 1)));
+                    epoch_items.push_back(&var.unconditioned[u_idx]);
+                }
+                if (!var.conditioned.empty()) {
+                    std::size_t c_idx = static_cast<std::size_t>(rng.uniform_int(0, static_cast<int>(var.conditioned.size() - 1)));
+                    epoch_items.push_back(&var.conditioned[c_idx]);
+                }
+            }
+
+            rng.shuffle(epoch_items);
+
+            for (std::size_t i = 0; i < epoch_items.size(); i += cfg.batch_size) {
+                const std::size_t cur_batch = std::min(cfg.batch_size, epoch_items.size() - i);
                 model.zero_grad();
 
                 for (std::size_t b = 0; b < cur_batch; ++b) {
-                    const auto& item = train_items[i + b];
-                    auto out = model.forward(item.tokens);
+                    const auto* item = epoch_items[i + b];
+                    auto out = model.forward(item->tokens);
 
-                    auto [c_loss, d_c] = CrossEntropyLoss::compute_from_index(out.choice_probs, item.y);
-                    auto [n_loss, d_n] = CrossEntropyLoss::compute_from_index(out.noul_probs, item.noul_target);
-                    auto [s_loss, d_s] = MSELoss::compute_scalar(out.score, item.score_target);
+                    auto [c_loss, d_c] = CrossEntropyLoss::compute_from_index(out.choice_probs, item->y);
+                    auto [n_loss, d_n] = CrossEntropyLoss::compute_from_index(out.noul_probs, item->noul_target);
+                    auto [s_loss, d_s] = MSELoss::compute_scalar(out.score, item->score_target);
 
                     const Scalar scale = 1.0f / static_cast<Scalar>(cur_batch);
                     for (auto& g : d_c) g *= scale;
@@ -420,22 +455,20 @@ public:
         // Calibration on Validation split
         std::vector<Vector> val_logits;
         std::vector<std::size_t> val_targets;
-        val_logits.reserve(split.val.size() * 4);
-        val_targets.reserve(split.val.size() * 4);
+        val_logits.reserve(split.val.size() * 2);
+        val_targets.reserve(split.val.size() * 2);
 
         for (const auto& sample : split.val) {
             auto it = state_lookup.find(sample.state_id);
             if (it == state_lookup.end()) continue;
             const auto& st = it->second;
 
-            for (std::size_t s = 0; s < 4; ++s) {
-                auto style = static_cast<TextualStyle>(s);
-                std::string text = TextualStateGenerator::generate_text(st, style);
-                auto tokens = tokenizer.tokenize(text);
-                model.forward(tokens);
-                val_logits.push_back(model.choice_logits());
-                val_targets.push_back(sample.y);
-            }
+            auto style = static_cast<TextualStyle>(rng.uniform_int(0, 3));
+            std::string text = TextualStateGenerator::generate_text(st, style);
+            auto tokens = tokenizer.tokenize(text);
+            model.forward(tokens);
+            val_logits.push_back(model.choice_logits());
+            val_targets.push_back(sample.y);
         }
 
         TemperatureScaler scaler;
@@ -445,8 +478,8 @@ public:
         predictor.fit_threshold(val_logits, cfg.ood_percentile);
 
         ModelIdentity identity{
-            .model_name = "TinySystemOne-TextTransformerClassifier",
-            .version = "1.0.0",
+            .model_name = "TinySystemOne-QuestionTransformerClassifier",
+            .version = "2.0.0",
             .trained_timestamp = static_cast<std::uint64_t>(std::chrono::system_clock::now().time_since_epoch().count()),
             .parameter_count = model.num_params(),
             .calibrated_temperature = scaler.temperature,
@@ -459,6 +492,13 @@ public:
     [[nodiscard]] ClassificationResult classify(std::string_view text) const {
         const auto t_start = std::chrono::steady_clock::now();
         auto tokens = tokenizer_.tokenize(text);
+        return classify_tokens_internal(tokens, t_start);
+    }
+
+    // Dynamic Question-Conditioned Judgment (v2.0)
+    [[nodiscard]] ClassificationResult ask(std::string_view state_text, std::string_view question_text) const {
+        const auto t_start = std::chrono::steady_clock::now();
+        auto tokens = tokenizer_.tokenize_qa(state_text, question_text);
         return classify_tokens_internal(tokens, t_start);
     }
 
@@ -543,6 +583,7 @@ private:
             res.locus = Noul::None;
             res.score = 0.0f;
             res.uncertainty = 1.0f;
+            res.noul_truth_probability = 0.0f;
             res.choice_probabilities = {0.25f, 0.25f, 0.25f, 0.25f};
             res.locus_probabilities.fill(1.0f / 7.0f);
             res.confidence = 0.25f;
@@ -571,6 +612,7 @@ private:
 
         res.score = out.score;
         res.uncertainty = out.uncertainty;
+        res.noul_truth_probability = out.score;
 
         if (res.choice == Choice::Nominal && res.confidence >= 0.90f) {
             res.decision_status = "CONFIDENT_NOMINAL";

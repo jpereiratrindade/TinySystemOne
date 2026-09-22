@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 project(TinySystemOne
-    VERSION 1.0.0
+    VERSION 2.0.0
     DESCRIPTION "A white-box C++26 engine to study calibrated probabilistic judgments and uncertainty"
     LANGUAGES CXX
 )
@@ -9,6 +9,10 @@ set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build." FORCE)
+endif()
 
 option(ENABLE_SANITIZERS "Enable Address and Undefined Behavior sanitizers in Debug" OFF)
 
@@ -64,6 +68,9 @@ target_include_directories(tso_exp009 PRIVATE include)
 add_executable(tso_exp010 src/exp010_main.cpp)
 target_include_directories(tso_exp010 PRIVATE include)
 
+add_executable(tso_exp011 src/exp011_main.cpp)
+target_include_directories(tso_exp011 PRIVATE include)
+
 # High-Level Production Classifier CLI & Tool
 add_executable(tso_classifier src/classifier_cli.cpp)
 target_include_directories(tso_classifier PRIVATE include)
@@ -84,6 +91,9 @@ target_include_directories(test_classifier PRIVATE include)
 add_executable(test_text_classifier tests/test_text_classifier.cpp)
 target_include_directories(test_text_classifier PRIVATE include)
 
+add_executable(test_question_conditioning tests/test_question_conditioning.cpp)
+target_include_directories(test_question_conditioning PRIVATE include)
+
 add_executable(test_tokenizer tests/test_tokenizer.cpp)
 target_include_directories(test_tokenizer PRIVATE include)
 
@@ -99,6 +109,7 @@ add_test(NAME TestDataset COMMAND test_dataset)
 add_test(NAME TestAcceptance COMMAND test_acceptance)
 add_test(NAME TestClassifier COMMAND test_classifier)
 add_test(NAME TestTextClassifier COMMAND test_text_classifier)
+add_test(NAME TestQuestionConditioning COMMAND test_question_conditioning)
 add_test(NAME TestTokenizer COMMAND test_tokenizer)
 add_test(NAME TestTextTokenizer COMMAND test_text_tokenizer)
 add_test(NAME TestAttention COMMAND test_attention)
@@ -112,6 +123,7 @@ add_test(NAME Exp007 COMMAND tso_exp007)
 add_test(NAME Exp008 COMMAND tso_exp008)
 add_test(NAME Exp009 COMMAND tso_exp009)
 add_test(NAME Exp010 COMMAND tso_exp010)
+add_test(NAME Exp011 COMMAND tso_exp011)
 
 
 
